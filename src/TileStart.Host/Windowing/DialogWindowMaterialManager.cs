@@ -16,7 +16,6 @@ internal static class DialogWindowMaterialManager
     private const int AccentEnableAcrylicBlurBehind = 4;
     private const int AcrylicAccentFlags = 2;
     private const int DwmUseImmersiveDarkMode = 20;
-    private const int DwmSystemBackdropType = 38;
     private const int DwmWindowCornerPreference = 33;
     private const int DwmCaptionColor = 35;
     private const int DwmSystemBackdropNone = 0;
@@ -25,15 +24,6 @@ internal static class DialogWindowMaterialManager
     private const int DwmWindowCornerRound = 2;
     private const int DwmColorNone = unchecked((int)0xFFFFFFFE);
     private const byte Win10DialogTintAlpha = 0xCC;
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Margins
-    {
-        public int Left;
-        public int Right;
-        public int Top;
-        public int Bottom;
-    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct AccentPolicy
@@ -97,17 +87,7 @@ internal static class DialogWindowMaterialManager
             return;
         }
 
-        // 自绘标题栏必须让完整客户区的 Transient Acrylic 继续透出。
-        // 使用实体 CaptionColor 会在 Acrylic 上方额外画出一条 #202020/#F3F3F3 色带。
-        var captionColor = ResolveCaptionColor(materialApplied: true, fallbackBrush.Color);
-        _ = DwmSetWindowAttribute(handle, DwmCaptionColor, ref captionColor, sizeof(int));
-        var backdropResult = DwmSetWindowAttribute(handle, DwmSystemBackdropType, ref backdropType, sizeof(int));
-        var margins = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
-        var frameResult = backdropResult == 0
-            ? DwmExtendFrameIntoClientArea(handle, ref margins)
-            : backdropResult;
-
-        if (backdropResult != 0 || frameResult != 0)
+        if (!SystemWindowBackdrop.TryApplyDesktopAcrylic(handle, useDarkMode))
         {
             return;
         }
@@ -188,9 +168,6 @@ internal static class DialogWindowMaterialManager
             Marshal.FreeHGlobal(accentPointer);
         }
     }
-
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmExtendFrameIntoClientArea(nint window, ref Margins margins);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(

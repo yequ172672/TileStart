@@ -293,54 +293,36 @@ public sealed class Win10ThemeTests
         Assert.Equal(Color.FromRgb(0x1F, 0x1F, 0x1F), material.FallbackColor);
     }
 
-    [Fact]
-    public void Windows11StartMaterialKeepsWallpaperColorVisibleThroughAcrylic()
-    {
-        var material = Win10Theme.ResolveStartMaterial(
-            1,
-            highContrast: false,
-            AppThemeStyle.Windows11);
-
-        Assert.True(material.UseAcrylic);
-        Assert.Equal(unchecked((int)0xCC1C1C1C), material.AcrylicGradientColor);
-    }
-
-    [Fact]
-    public void Windows11StartMaterialTintsWithWallpaperDerivedStartColor()
+    [Theory]
+    [InlineData(false, 0xF3)]
+    [InlineData(true, 0x20)]
+    public void Windows11StartMaterialUsesNeutralSurfacesEvenWithAnAccent(bool dark, byte shade)
     {
         var material = Win10Theme.ResolveStartMaterial(
             1,
             highContrast: false,
             AppThemeStyle.Windows11,
-            startColorMenu: unchecked((int)0x00574E84));
+            startColorMenu: unchecked((int)0x00C06700),
+            colorPrevalence: 1,
+            accentPalette: null,
+            useDarkMode: dark);
 
         Assert.True(material.UseAcrylic);
-        Assert.Equal(unchecked((int)0xBF574E84), material.AcrylicGradientColor);
-        Assert.Equal(Color.FromRgb(0x84, 0x4E, 0x57), material.LiveResizeColor);
+        Assert.Equal(0, material.AcrylicGradientColor);
+        Assert.Equal(Color.FromRgb(shade, shade, shade), material.FallbackColor);
+        Assert.Equal(material.FallbackColor, material.LiveResizeColor);
     }
 
-    [Fact]
-    public void Windows11StartMaterialFallsBackToNeutralTintWithoutWallpaperColor()
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, true)]
+    public void Windows11StartMaterialRespectsTransparencyAndHighContrast(int transparency, bool highContrast)
     {
-        Assert.Equal(
-            unchecked((int)0xCC1C1C1C),
-            Win10Theme.ResolveWindows11GradientColor(startColorMenu: null));
-    }
+        var material = Win10Theme.ResolveStartMaterial(
+            transparency, highContrast, AppThemeStyle.Windows11, useDarkMode: false);
 
-    [Fact]
-    public void StartSurfaceColorUnpacksWallpaperDerivedStartColor()
-    {
-        Assert.Equal(
-            Color.FromRgb(0x84, 0x4E, 0x57),
-            Win10Theme.ResolveStartSurfaceColor(unchecked((int)0x00574E84)));
-    }
-
-    [Fact]
-    public void StartSurfaceColorFallsBackToNeutralWithoutWallpaperColor()
-    {
-        Assert.Equal(
-            Color.FromRgb(0x1C, 0x1C, 0x1C),
-            Win10Theme.ResolveStartSurfaceColor(startColorMenu: null));
+        Assert.False(material.UseAcrylic);
+        Assert.Equal(Color.FromRgb(0xF3, 0xF3, 0xF3), material.FallbackColor);
     }
 
     [Theory]

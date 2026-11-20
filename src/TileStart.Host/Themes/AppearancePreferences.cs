@@ -16,5 +16,5 @@ public enum AppColorMode
 public sealed class AppearancePreferences
 {
     public AppThemeStyle ThemeStyle { get; set; } = AppThemeStyle.Windows11;
-    public AppColorMode ColorMode { get; set; } = AppColorMode.System;
+    public AppColorMode ColorMode { get; set; } = AppColorMode.Light;
 }

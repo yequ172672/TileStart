@@ -129,10 +129,9 @@ public sealed class PerformanceGuardTests
         Assert.Contains("message == WmEnterSizeMove", source, StringComparison.Ordinal);
         Assert.Contains("message == WmExitSizeMove", source, StringComparison.Ordinal);
         Assert.Contains("SetAccentPolicy(0, 0, 0);", source, StringComparison.Ordinal);
-        Assert.Contains("var material = Win10Theme.ReadStartMaterial(_themeStyle);", source, StringComparison.Ordinal);
+        Assert.Contains("ClearSystemBackdrop();", source, StringComparison.Ordinal);
+        Assert.Contains("var material = Win10Theme.ReadStartMaterial(_themeStyle, _useDarkMode);", source, StringComparison.Ordinal);
         Assert.Contains("new SolidColorBrush(material.LiveResizeColor)", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("new SolidColorBrush(Win10Theme.StartSurfaceColor)", source,
-            StringComparison.Ordinal);
         Assert.Contains("ApplyWindowMaterial();", source, StringComparison.Ordinal);
     }
 

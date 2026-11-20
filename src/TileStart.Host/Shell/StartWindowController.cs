@@ -75,6 +75,7 @@ public class StartWindowController : IDisposable
     private bool _isDisplayChangePending;
     private bool _isLiveResizeActive;
     private bool _restoreMaterialAfterLiveResize;
+    private bool _systemBackdropApplied;
     private nint _pendingDisplayMonitor;
     private readonly double _requestedMinimumHeight;
     private readonly bool _useDarkMode;
@@ -302,14 +303,45 @@ public class StartWindowController : IDisposable
 
         ApplyWindowCornerPreference();
         var material = Win10Theme.ReadStartMaterial(_themeStyle, _useDarkMode);
-        var acrylicApplied = SetAccentPolicy(
-            material.UseAcrylic ? AccentEnableAcrylicBlurBehind : 0,
-            material.UseAcrylic ? 2 : 0,
-            material.AcrylicGradientColor);
-        _mainSurface.Background = material.UseAcrylic && acrylicApplied
-            ? System.Windows.Media.Brushes.Transparent
-            : new SolidColorBrush(material.FallbackColor);
+        if (_themeStyle == AppThemeStyle.Windows11)
+        {
+            var handle = new WindowInteropHelper(_window).Handle;
+            if (material.UseAcrylic)
+            {
+                _systemBackdropApplied = SystemWindowBackdrop.TryApplyDesktopAcrylic(handle, _useDarkMode);
+            }
+            else
+            {
+                ClearSystemBackdrop();
+            }
+
+            var tint = material.FallbackColor;
+            if (_systemBackdropApplied)
+            {
+                tint.A = 0x48;
+            }
+            _mainSurface.Background = new SolidColorBrush(tint);
+        }
+        else
+        {
+            var acrylicApplied = SetAccentPolicy(
+                material.UseAcrylic ? AccentEnableAcrylicBlurBehind : 0,
+                material.UseAcrylic ? 2 : 0,
+                material.AcrylicGradientColor);
+            _mainSurface.Background = material.UseAcrylic && acrylicApplied
+                ? System.Windows.Media.Brushes.Transparent
+                : new SolidColorBrush(material.FallbackColor);
+        }
         _restoreMaterialAfterLiveResize = false;
+    }
+
+    private void ClearSystemBackdrop()
+    {
+        if (_systemBackdropApplied)
+        {
+            SystemWindowBackdrop.Clear(new WindowInteropHelper(_window).Handle);
+            _systemBackdropApplied = false;
+        }
     }
 
     private void ApplyWindowCornerPreference()
@@ -785,8 +817,15 @@ public class StartWindowController : IDisposable
         // blur effect while the pointer is moving. The temporary surface must be resolved from
         // the current ColorPrevalence state; StartColorMenu can retain an old accent after the
         // user disables Start accent, so using the cached wallpaper colour would flash it back.
-        SetAccentPolicy(0, 0, 0);
-        var material = Win10Theme.ReadStartMaterial(_themeStyle);
+        if (_themeStyle == AppThemeStyle.Windows11)
+        {
+            ClearSystemBackdrop();
+        }
+        else
+        {
+            SetAccentPolicy(0, 0, 0);
+        }
+        var material = Win10Theme.ReadStartMaterial(_themeStyle, _useDarkMode);
         _mainSurface.Background = new SolidColorBrush(material.LiveResizeColor);
         DiagnosticLog.Write(
             $"Window live resize begin: width={_window.ActualWidth:F1}, min={_window.MinWidth:F1}, " +

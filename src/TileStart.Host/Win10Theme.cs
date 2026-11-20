@@ -38,16 +38,8 @@ public static class Win10Theme
     private const double Win10Dark2SaturationScale = 1.26;
     private const byte Win10NavigationOverlayAlpha = 0x80;
 
-    // Neutral fallback used when DWM publishes no wallpaper-derived Start colour.
-    // The matching StartDocked HostBackdrop resource evidence is retained outside the public repository.
-    private const int Windows11StartAcrylicGradientColor = unchecked((int)0xCC1C1C1C);
-
-    // TintOpacity 0.75 from the StartDocked HostBackdrop acrylic; leaves enough of the
-    // blurred wallpaper visible instead of covering it.
-    private const uint Windows11StartAcrylicTintAlpha = 0xBF;
     private static readonly MediaColor StartFallbackColor = MediaColor.FromRgb(0x1F, 0x1F, 0x1F);
     private static readonly MediaColor StartLightFallbackColor = MediaColor.FromRgb(0xE4, 0xE4, 0xE4);
-    private static readonly MediaColor NeutralStartSurfaceColor = MediaColor.FromRgb(0x1C, 0x1C, 0x1C);
 
     public static MediaColor AccentColor { get; } = ReadAccentColor();
 
@@ -63,29 +55,7 @@ public static class Win10Theme
 
     public static SolidColorBrush ContextMenuHighlightBrush => AccentBrush;
 
-    /// <summary>
-    /// Wallpaper-derived Start colour DWM publishes for the Start menu, or a neutral dark
-    /// tone when "automatically pick an accent colour from my background" is off. Used by the
-    /// Windows 11 theme for surfaces that sit over the acrylic and must share its hue.
-    /// </summary>
-    public static MediaColor StartSurfaceColor { get; } = ReadStartSurfaceColor();
-
     public static MediaColor NavigationOverlayColor { get; } = ReadNavigationOverlayColor();
-
-    /// <summary>
-    /// Windows 11 navigation overlay: the wallpaper-derived Start colour at the same opacity
-    /// the acrylic tint uses, so expanding the pane deepens the surface instead of covering it
-    /// with a flat grey.
-    /// </summary>
-    public static MediaColor StartSurfaceOverlayColor { get; } =
-        MediaColor.FromArgb(0xF2, StartSurfaceColor.R, StartSurfaceColor.G, StartSurfaceColor.B);
-
-    /// <summary>
-    /// Windows 11 tile face: the wallpaper-derived Start colour darkened so tiles stay readable
-    /// while still belonging to the surrounding surface.
-    /// </summary>
-    public static MediaColor StartTileBackgroundColor { get; } =
-        Blend(StartSurfaceColor, Colors.Black, 0.32);
 
     internal static MediaColor ResolveAccentColor(object? accentColorMenu, byte[]? palette, MediaColor fallback)
     {
@@ -140,41 +110,36 @@ public static class Win10Theme
         object? accentColorMenu = null,
         bool useDarkMode = true)
     {
-        var transparencyEnabled = enableTransparency is int value && value != 0;
-        var useWin10AccentAcrylic = themeStyle == AppThemeStyle.Windows10
-                                    && useDarkMode
-                                    && colorPrevalence is int prevalence
-                                    && prevalence != 0;
+        var useAcrylic = !highContrast && enableTransparency is int value && value != 0;
+        if (themeStyle == AppThemeStyle.Windows11)
+        {
+            var neutral = useDarkMode
+                ? MediaColor.FromRgb(0x20, 0x20, 0x20)
+                : MediaColor.FromRgb(0xF3, 0xF3, 0xF3);
+            return new StartMaterialConfiguration(useAcrylic, neutral, 0, neutral);
+        }
+
+        var useWin10AccentAcrylic = useDarkMode && colorPrevalence is int prevalence && prevalence != 0;
         var win10AccentColor = useWin10AccentAcrylic
             ? ResolveWin10AccentAcrylicColor(accentColorMenu, startColorMenu, accentPalette)
             : StartFallbackColor;
-        var useWin10LightAcrylic = themeStyle == AppThemeStyle.Windows10
-                                   && !useDarkMode
-                                   && !useWin10AccentAcrylic;
-
-        var useAcrylic = transparencyEnabled && !highContrast;
+        var useWin10LightAcrylic = !useDarkMode;
         var fallbackColor = useWin10AccentAcrylic && !highContrast
             ? win10AccentColor
             : useWin10LightAcrylic
                 ? StartLightFallbackColor
                 : StartFallbackColor;
-        var liveResizeColor = useAcrylic && themeStyle == AppThemeStyle.Windows11
-            ? ResolveStartSurfaceColor(startColorMenu)
-            : fallbackColor;
-
         return new StartMaterialConfiguration(
             useAcrylic,
             fallbackColor,
-            themeStyle == AppThemeStyle.Windows11
-                ? ResolveWindows11GradientColor(startColorMenu)
-                : useWin10AccentAcrylic
-                    ? PackAccentPolicyColor(
-                        ResolveWin10AccentWcaTintColor(win10AccentColor),
-                        Win10AccentAcrylicTintAlpha)
-                    : useWin10LightAcrylic
-                        ? StartLightAcrylicGradientColor
-                        : StartAcrylicGradientColor,
-            liveResizeColor);
+            useWin10AccentAcrylic
+                ? PackAccentPolicyColor(
+                    ResolveWin10AccentWcaTintColor(win10AccentColor),
+                    Win10AccentAcrylicTintAlpha)
+                : useWin10LightAcrylic
+                    ? StartLightAcrylicGradientColor
+                    : StartAcrylicGradientColor,
+            fallbackColor);
     }
 
     internal static MediaColor ResolveWin10AccentWcaTintColor(MediaColor accentDark1) =>
@@ -247,24 +212,6 @@ public static class Win10Theme
         return MediaColor.FromArgb(Win10NavigationOverlayAlpha, dark2.R, dark2.G, dark2.B);
     }
 
-    /// <summary>
-    /// Windows 11 tints the Start surface with the wallpaper-derived colour DWM publishes as
-    /// StartColorMenu, so the menu picks up the desktop hue instead of a fixed grey. Falls back
-    /// to a neutral dark tint when the value is missing, which is the case when
-    /// "automatically pick an accent colour from my background" is off.
-    /// </summary>
-    internal static int ResolveWindows11GradientColor(object? startColorMenu)
-    {
-        if (!TryReadPackedColor(startColorMenu, out var packed))
-        {
-            return Windows11StartAcrylicGradientColor;
-        }
-
-        // StartColorMenu stores the colour as 0x00BBGGRR; AccentPolicy expects 0xAABBGGRR,
-        // so the existing tint's alpha is kept and only the colour channels are replaced.
-        return unchecked((int)((Windows11StartAcrylicTintAlpha << 24) | (packed & 0x00FFFFFF)));
-    }
-
     internal static StartMaterialConfiguration ReadStartMaterial(AppThemeStyle themeStyle, bool useDarkMode = true)
     {
         object? enableTransparency = null;
@@ -284,10 +231,13 @@ public static class Win10Theme
         byte[]? accentPalette = null;
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(AccentRegistryPath);
-            startColorMenu = key?.GetValue("StartColorMenu");
-            accentColorMenu = key?.GetValue("AccentColorMenu");
-            accentPalette = key?.GetValue("AccentPalette") as byte[];
+            if (themeStyle == AppThemeStyle.Windows10)
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(AccentRegistryPath);
+                startColorMenu = key?.GetValue("StartColorMenu");
+                accentColorMenu = key?.GetValue("AccentColorMenu");
+                accentPalette = key?.GetValue("AccentPalette") as byte[];
+            }
         }
         catch (Exception)
         {
@@ -302,21 +252,6 @@ public static class Win10Theme
             accentPalette,
             accentColorMenu,
             useDarkMode);
-    }
-
-    private static MediaColor ReadStartSurfaceColor()
-    {
-        object? startColorMenu = null;
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(AccentRegistryPath);
-            startColorMenu = key?.GetValue("StartColorMenu");
-        }
-        catch (Exception)
-        {
-        }
-
-        return ResolveStartSurfaceColor(startColorMenu);
     }
 
     private static MediaColor ReadNavigationOverlayColor()
@@ -341,14 +276,6 @@ public static class Win10Theme
             accentColorMenu,
             accentPalette,
             MediaColor.FromArgb(Win10NavigationOverlayAlpha, 0x2C, 0x2C, 0x2C));
-    }
-
-    internal static MediaColor ResolveStartSurfaceColor(object? startColorMenu)
-    {
-        // StartColorMenu is packed as 0x00BBGGRR.
-        return TryReadPackedColor(startColorMenu, out var packed)
-            ? MediaColor.FromRgb((byte)packed, (byte)(packed >> 8), (byte)(packed >> 16))
-            : NeutralStartSurfaceColor;
     }
 
     private static MediaColor ReadAccentColor()

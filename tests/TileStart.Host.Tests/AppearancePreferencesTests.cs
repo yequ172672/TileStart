@@ -21,12 +21,12 @@ public sealed class AppearancePreferencesTests
             AppThemeStyle.Windows10));
     }
     [Fact]
-    public void DefaultsToWindows11Style()
+    public void DefaultsToWindows11LightStyle()
     {
         var preferences = new AppearancePreferences();
 
         Assert.Equal(AppThemeStyle.Windows11, preferences.ThemeStyle);
-        Assert.Equal(AppColorMode.System, preferences.ColorMode);
+        Assert.Equal(AppColorMode.Light, preferences.ColorMode);
     }
 
     [Theory]
