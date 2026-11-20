@@ -11,20 +11,25 @@ public sealed class UpdateInstallerLauncherTests
     {
         var installerPath = Path.Combine(Path.GetTempPath(), "TileStart", "updates", "v0.1.19", "attempt", "setup.exe");
 
-        var startInfo = UpdateInstallerLauncher.CreateStartInfo(installerPath, 1234);
+        var hostPath = Path.Combine(Path.GetTempPath(), "portable dir", "TileStart.Host.exe");
+        var update = new DownloadedUpdate(UpdatePackageKind.Installer, installerPath, new Version(0, 1, 19), new string('a', 64));
+        var startInfo = UpdateInstallerLauncher.CreateStartInfo(update, hostPath, 1234, portable: true);
 
-        Assert.Equal("powershell.exe", startInfo.FileName);
+        Assert.EndsWith("powershell.exe", startInfo.FileName, StringComparison.OrdinalIgnoreCase);
         Assert.False(startInfo.UseShellExecute);
         Assert.True(startInfo.CreateNoWindow);
         Assert.Equal(ProcessWindowStyle.Hidden, startInfo.WindowStyle);
         Assert.Equal(Path.GetFullPath(installerPath), startInfo.Environment["TILESTART_UPDATE_PATH"]);
         Assert.Equal("1234", startInfo.Environment["TILESTART_UPDATE_PID"]);
-        Assert.Contains(startInfo.ArgumentList, argument => argument.Contains("Wait-Process", StringComparison.Ordinal));
+        Assert.Equal(hostPath, startInfo.Environment["TILESTART_UPDATE_HOST"]);
+        Assert.Equal("portable", startInfo.Environment["TILESTART_UPDATE_MODE"]);
+        Assert.Equal(update.Sha256, startInfo.Environment["TILESTART_UPDATE_SHA256"]);
+        Assert.Contains(startInfo.ArgumentList, argument => argument.Contains("WaitForExit()", StringComparison.Ordinal));
         Assert.Contains(startInfo.ArgumentList, argument => argument.Contains("-Wait -PassThru", StringComparison.Ordinal));
-        Assert.Contains(startInfo.ArgumentList, argument => argument.Contains("ExitCode -eq 0", StringComparison.Ordinal));
+        Assert.Contains(startInfo.ArgumentList, argument => argument.Contains("ExitCode -ne 0", StringComparison.Ordinal));
         Assert.Contains(startInfo.ArgumentList, argument => argument.Contains("Remove-Item", StringComparison.Ordinal));
         Assert.Contains(startInfo.ArgumentList, argument =>
-            argument.Contains("(Test-Path -LiteralPath $updateDirectory -PathType Container) -and", StringComparison.Ordinal));
+            argument.Contains("Start-Process -FilePath $env:TILESTART_UPDATE_HOST", StringComparison.Ordinal));
         Assert.DoesNotContain(startInfo.ArgumentList,
             (string argument) => argument.Contains(installerPath, StringComparison.Ordinal));
     }
@@ -34,6 +39,7 @@ public sealed class UpdateInstallerLauncherTests
     {
         var installerPath = Path.Combine(Path.GetTempPath(), "unrelated", "setup.exe");
 
-        Assert.Throws<ArgumentException>(() => UpdateInstallerLauncher.CreateStartInfo(installerPath, 1234));
+        var update = new DownloadedUpdate(UpdatePackageKind.Installer, installerPath, new Version(0, 1, 19), new string('a', 64));
+        Assert.Throws<ArgumentException>(() => UpdateInstallerLauncher.CreateStartInfo(update, @"C:\TileStart\TileStart.Host.exe", 1234, portable: false));
     }
 }

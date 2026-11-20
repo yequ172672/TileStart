@@ -79,8 +79,21 @@
 
 ## 发布自动化
 
-- `GitHubUpdateService` 从 `yequ172672/TileStart` 的最新正式 Release 检查更新。Release 页面和附件必须属于同一仓库及版本，安装器和便携包须通过对应 `SHA256SUMS.txt` 的校验。
-- 安装版复用完整安装器，由 `UpdateInstallerLauncher` 等 Host 退出后启动；便携版下载校验后交给用户解压。`Local Hotfix` 的 Actions 产物用于显式开发部署。
+| Key Files | 用途 |
+| --- | --- |
+| `scripts/Build-ReleaseUpdate.ps1` | 验证上一正式版的便携包，生成更新清单、可选热补丁和发布校验文件。 |
+| `src/TileStart.Host/Updates/UpdateReleaseManifest.cs` | 解析经校验的清单，检查基线版本和安装文件 SHA-256。 |
+
+### Dependencies
+
+- Release 构建使用现有 GitHub CLI 获取基线附件，使用现有 Inno Setup 编译完整安装器和热补丁。运行时交接使用系统自带的 Windows PowerShell。
+
+### Common Patterns
+
+- `GitHubUpdateService` 只接受 fork 同版本 Release 附件，并通过对应的 `SHA256SUMS.txt` 校验。基线版本及文件匹配时优先下载热补丁，缺少补丁或验证失败时使用完整包。
+- Release 始终提供完整包。运行时或外部依赖变化、文件集合变化、无可用上一正式版时仅发布完整包。补丁和完整包由同一 Inno Setup 脚本生成，补丁写入前复查基线。
+- `UpdateInstallerLauncher` 等待 Host 退出，将包覆盖到当前目录并从原会话重新启动。便携自更新采用 Inno Setup 当前用户模式，跳过卸载器、快捷方式、注册表和安装标记。早期 Release 仍支持手动解压便携包。`Local Hotfix` 继续用于显式开发部署。
+
 - 用户要求发布明确版本（例如“发布 0.1.1”）时，默认在 `main` 上触发 GitHub Actions 的 `Release` 工作流并传入版本号，监控到完成后报告 Release 地址和产物；不再手工构建、计算校验值或逐个上传附件。
 - 每个 GitHub Release 必须填写面向用户的中文更新说明，至少概括本版新增、修复和重要兼容性变化；不能留空、只放 Full Changelog 链接或只依赖附件。工作流生成 Release 后检查正文，不完整时使用 `gh release edit` 补齐。
 - Release 成功后只报告版本、地址和产物；只有用户明确要求“更新本地”或“安装该版本”时，才下载并校验正式安装器，先通过 Host 的 `--shutdown` 正常卸载 Hook，再执行升级安装、恢复 Host，并核对安装版本与基本启动行为。

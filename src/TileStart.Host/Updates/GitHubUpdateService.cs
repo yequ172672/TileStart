@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using TileStart.Host.Utilities;
 
 namespace TileStart.Host.Updates;
 
@@ -11,6 +12,7 @@ public enum UpdatePackageKind
 {
     Installer,
     PortableArchive,
+    PatchInstaller,
 }
 
 public enum UpdateProgressStage
@@ -39,9 +41,11 @@ public sealed record GitHubReleaseInfo(
     Uri ReleasePage,
     GitHubReleaseAsset Installer,
     GitHubReleaseAsset PortableArchive,
-    GitHubReleaseAsset Checksums);
+    GitHubReleaseAsset Checksums,
+    GitHubReleaseAsset? UpdateManifest,
+    GitHubReleaseAsset? PatchInstaller);
 
-public sealed record DownloadedUpdate(UpdatePackageKind Kind, string Path, Version Version);
+public sealed record DownloadedUpdate(UpdatePackageKind Kind, string Path, Version Version, string Sha256);
 
 public sealed class GitHubUpdateService
 {
@@ -51,9 +55,16 @@ public sealed class GitHubUpdateService
     private const string InstallerAssetName = "TileStart-Setup-win-x64.exe";
     private const string PortableAssetName = "TileStart-portable-win-x64.zip";
     private const string ChecksumAssetName = "SHA256SUMS.txt";
+    private const string UpdateManifestName = "TileStart-Update.txt";
+    private const string PatchAssetName = "TileStart-Patch-win-x64.exe";
     private const long MaximumPackageBytes = 200L * 1024 * 1024;
     private const int MaximumChecksumBytes = 64 * 1024;
-    private static readonly HttpClient HttpClient = CreateHttpClient();
+    private static readonly HttpClient SharedHttpClient = CreateHttpClient();
+    private readonly HttpClient _httpClient;
+
+    public GitHubUpdateService() : this(SharedHttpClient) { }
+
+    internal GitHubUpdateService(HttpClient httpClient) => _httpClient = httpClient;
 
     public static Version CurrentVersion => NormalizeVersion(
         Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(0, 0, 0));
@@ -63,7 +74,7 @@ public sealed class GitHubUpdateService
         using var request = new HttpRequestMessage(HttpMethod.Get, LatestReleaseApi);
         request.Headers.Accept.ParseAdd("application/vnd.github+json");
         request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
-        using var response = await HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead,
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -72,16 +83,71 @@ public sealed class GitHubUpdateService
 
     public async Task<DownloadedUpdate> DownloadAsync(
         GitHubReleaseInfo release,
-        bool installedCopy,
+        Version currentVersion,
+        string? executablePath,
         IProgress<UpdateProgressInfo>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var package = SelectPackage(release, installedCopy);
         progress?.Report(new UpdateProgressInfo(UpdateProgressStage.DownloadingChecksums));
         var checksumText = await DownloadTextAsync(release.Checksums.DownloadUri, MaximumChecksumBytes,
             cancellationToken);
+        var manifest = await TryDownloadManifestAsync(release, checksumText, cancellationToken);
+        var fullPackage = SelectPackage(release, IsInstalledCopy(executablePath) || manifest is not null);
+        if (manifest is not null && release.PatchInstaller is { } patch && Path.GetDirectoryName(executablePath) is { } directory
+            && await manifest.MatchesAsync(currentVersion, directory, cancellationToken))
+        {
+            try
+            {
+                return await DownloadPackageAsync(release.Version, (UpdatePackageKind.PatchInstaller, patch),
+                    checksumText, progress, cancellationToken);
+            }
+            catch (Exception exception) when (IsOptionalAssetFailure(exception))
+            {
+                DiagnosticLog.Write($"Patch unavailable; using the full package: {exception.Message}");
+            }
+        }
+
+        return await DownloadPackageAsync(release.Version, fullPackage, checksumText, progress, cancellationToken);
+    }
+
+    private async Task<UpdateReleaseManifest?> TryDownloadManifestAsync(
+        GitHubReleaseInfo release, string checksums, CancellationToken cancellationToken)
+    {
+        if (release.UpdateManifest is not { } asset)
+        {
+            return null;
+        }
+
+        try
+        {
+            var bytes = await DownloadBytesAsync(asset.DownloadUri, 128 * 1024, cancellationToken);
+            var hash = Convert.ToHexString(SHA256.HashData(bytes));
+            if (!hash.Equals(ReadExpectedSha256(checksums, asset.Name), StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("更新清单的 SHA-256 校验失败。");
+            }
+
+            return UpdateReleaseManifest.Parse(System.Text.Encoding.UTF8.GetString(bytes));
+        }
+        catch (Exception exception) when (IsOptionalAssetFailure(exception))
+        {
+            DiagnosticLog.Write($"Update manifest unavailable: {exception.Message}");
+            return null;
+        }
+    }
+
+    private static bool IsOptionalAssetFailure(Exception exception) =>
+        exception is HttpRequestException or IOException or InvalidDataException or UnauthorizedAccessException;
+
+    private async Task<DownloadedUpdate> DownloadPackageAsync(
+        Version version,
+        (UpdatePackageKind Kind, GitHubReleaseAsset Asset) package,
+        string checksumText,
+        IProgress<UpdateProgressInfo>? progress,
+        CancellationToken cancellationToken)
+    {
         var expectedHash = ReadExpectedSha256(checksumText, package.Asset.Name);
-        var directory = CreateDownloadDirectory(release.Version);
+        var directory = CreateDownloadDirectory(version);
         Directory.CreateDirectory(directory);
         var destination = Path.Combine(directory, package.Asset.Name);
         await DownloadFileAsync(package.Asset.DownloadUri, destination, MaximumPackageBytes, progress,
@@ -100,13 +166,14 @@ public sealed class GitHubUpdateService
         }
 
         progress?.Report(new UpdateProgressInfo(UpdateProgressStage.PreparingInstall));
-        return new DownloadedUpdate(package.Kind, destination, release.Version);
+        return new DownloadedUpdate(package.Kind, destination, version, expectedHash);
     }
 
     public static bool IsInstalledCopy(string? executablePath)
     {
         var directory = string.IsNullOrWhiteSpace(executablePath) ? null : Path.GetDirectoryName(executablePath);
-        return directory is not null && File.Exists(Path.Combine(directory, "unins000.exe"));
+        return directory is not null && (File.Exists(Path.Combine(directory, ".tilestart-installation"))
+                                         || File.Exists(Path.Combine(directory, "unins000.exe")));
     }
 
     internal static bool IsNewer(Version current, Version available) =>
@@ -146,7 +213,9 @@ public sealed class GitHubUpdateService
             releasePage,
             RequireAsset(assets, InstallerAssetName, downloadPath),
             RequireAsset(assets, PortableAssetName, downloadPath),
-            RequireAsset(assets, ChecksumAssetName, downloadPath));
+            RequireAsset(assets, ChecksumAssetName, downloadPath),
+            FindAsset(assets, UpdateManifestName, downloadPath),
+            FindAsset(assets, PatchAssetName, downloadPath));
     }
 
     internal static string ReadExpectedSha256(string manifest, string fileName)
@@ -173,11 +242,14 @@ public sealed class GitHubUpdateService
     }
 
     private static GitHubReleaseAsset RequireAsset(
+        IEnumerable<ReleaseAssetResponse> assets, string name, string downloadPath) =>
+        FindAsset(assets, name, downloadPath) ?? throw new InvalidDataException($"GitHub Release 缺少资产：{name}");
+
+    private static GitHubReleaseAsset? FindAsset(
         IEnumerable<ReleaseAssetResponse> assets, string name, string downloadPath)
     {
-        var asset = assets.SingleOrDefault(candidate => candidate.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
-                    ?? throw new InvalidDataException($"GitHub Release 缺少资产：{name}");
-        return new GitHubReleaseAsset(name, RequireReleaseUri(asset.BrowserDownloadUrl, downloadPath + name));
+        var asset = assets.SingleOrDefault(candidate => candidate.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        return asset is null ? null : new GitHubReleaseAsset(name, RequireReleaseUri(asset.BrowserDownloadUrl, downloadPath + name));
     }
 
     private static Uri RequireReleaseUri(string? value, string releasePath)
@@ -192,10 +264,13 @@ public sealed class GitHubUpdateService
         return uri;
     }
 
-    private static async Task<string> DownloadTextAsync(Uri uri, int maximumBytes,
+    private async Task<string> DownloadTextAsync(Uri uri, int maximumBytes, CancellationToken cancellationToken) =>
+        System.Text.Encoding.UTF8.GetString(await DownloadBytesAsync(uri, maximumBytes, cancellationToken));
+
+    private async Task<byte[]> DownloadBytesAsync(Uri uri, int maximumBytes,
         CancellationToken cancellationToken)
     {
-        using var response = await HttpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead,
+        using var response = await _httpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength is > 0 and var length && length > maximumBytes)
@@ -206,10 +281,10 @@ public sealed class GitHubUpdateService
         await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var output = new MemoryStream();
         await CopyWithLimitAsync(input, output, maximumBytes, cancellationToken);
-        return System.Text.Encoding.UTF8.GetString(output.ToArray());
+        return output.ToArray();
     }
 
-    private static async Task DownloadFileAsync(
+    private async Task DownloadFileAsync(
         Uri uri,
         string destination,
         long maximumBytes,
@@ -219,7 +294,7 @@ public sealed class GitHubUpdateService
         var temporaryPath = destination + ".download";
         try
         {
-            using var response = await HttpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead,
+            using var response = await _httpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
             response.EnsureSuccessStatusCode();
             if (response.Content.Headers.ContentLength is > 0 and var length && length > maximumBytes)

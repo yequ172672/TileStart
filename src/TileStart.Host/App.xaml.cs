@@ -303,14 +303,14 @@ public partial class App : System.Windows.Application
                 return;
             }
 
-            var installedCopy = GitHubUpdateService.IsInstalledCopy(Environment.ProcessPath);
-            var packageDescription = installedCopy ? "安装器" : "便携版压缩包";
+            var hostPath = Environment.ProcessPath ?? throw new InvalidOperationException("无法找到当前程序路径。");
+            var installedCopy = GitHubUpdateService.IsInstalledCopy(hostPath);
             var shouldDownload = TileStartMessageDialog.Confirm(
                 owner,
                 "发现新版本",
-                $"发现新版本 {release.Version.ToString(3)}（当前 {currentVersion.ToString(3)}）。\n\n是否从 GitHub 下载并校验{packageDescription}？",
+                $"发现新版本 {release.Version.ToString(3)}（当前 {currentVersion.ToString(3)}）。\n\n将自动选择热补丁或完整包，校验完成后更新并重新启动 TileStart。",
                 TileStartMessageKind.Question,
-                primaryText: "下载并校验",
+                primaryText: "更新",
                 secondaryText: "暂不更新");
             if (!shouldDownload)
             {
@@ -318,19 +318,19 @@ public partial class App : System.Windows.Application
                 return;
             }
 
-            DiagnosticLog.Write($"Update download accepted: package={packageDescription}.");
+            DiagnosticLog.Write("Update download accepted.");
             using var downloadTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
             progressWindow = new UpdateProgressWindow(owner);
             var update = progressWindow.Run(
                 (progress, cancellationToken) =>
-                    _updateService.DownloadAsync(release, installedCopy, progress, cancellationToken),
+                    _updateService.DownloadAsync(release, currentVersion, hostPath, progress, cancellationToken),
                 downloadTimeout.Token);
             DiagnosticLog.Write(
                 $"Update package ready: version={update.Version.ToString(3)}, kind={update.Kind}.");
-            if (update.Kind == UpdatePackageKind.Installer)
+            if (update.Kind is UpdatePackageKind.Installer or UpdatePackageKind.PatchInstaller)
             {
                 // 助手先等待当前 Host 完全退出，安装器才会覆盖文件；否则 Injector/Hook 清理与安装会发生竞态。
-                UpdateInstallerLauncher.LaunchAfterHostExit(update.Path, Environment.ProcessId);
+                UpdateInstallerLauncher.LaunchAfterHostExit(update, hostPath, Environment.ProcessId, portable: !installedCopy);
                 DiagnosticLog.Write("Update installer helper launched; shutting down Host.");
                 ((MainWindow)MainWindow).AllowClose();
                 Shutdown();

@@ -2,7 +2,8 @@
 param(
     [switch]$SkipInstaller,
     [string]$Version,
-    [string]$InformationalVersion
+    [string]$InformationalVersion,
+    [string]$ReleaseRepository
 )
 
 $ErrorActionPreference = 'Stop'
@@ -117,3 +118,7 @@ if ($LASTEXITCODE -ne 0)
 
 $installerPath = Join-Path $artifactsRoot 'installer\TileStart-Setup-win-x64.exe'
 Write-Checksums @($installerPath, $portableArchive)
+
+if ($ReleaseRepository) {
+    & (Join-Path $PSScriptRoot 'Build-ReleaseUpdate.ps1') -Version $Version -Repository $ReleaseRepository -InnoSetupCompiler $iscc
+}

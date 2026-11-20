@@ -16,12 +16,18 @@ DirExistsWarning=yes
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
+PrivilegesRequiredOverridesAllowed=commandline
+Uninstallable=not IsPortableUpdate
 ; Autostart and Explorer context menus intentionally remain per-user.
 UsedUserAreasWarning=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\artifacts\installer
+#ifdef PatchDirectory
+OutputBaseFilename=TileStart-Patch-win-x64
+#else
 OutputBaseFilename=TileStart-Setup-win-x64
+#endif
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -36,7 +42,12 @@ RestartApplications=no
 Name: "desktopicon"; Description: "创建桌面快捷方式"; Flags: unchecked
 
 [Files]
+#ifdef PatchDirectory
+Source: "{#PatchDirectory}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PatchManifest}"; Flags: dontcopy
+#else
 Source: "..\artifacts\package\TileStart\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
 
 [UninstallDelete]
 ; This marker is the only installer-created file outside Inno Setup's normal
@@ -45,29 +56,39 @@ Source: "..\artifacts\package\TileStart\*"; DestDir: "{app}"; Flags: ignoreversi
 Type: files; Name: "{app}\.tilestart-installation"
 
 [Icons]
-Name: "{group}\TileStart"; Filename: "{app}\{#AppExeName}"
-Name: "{autodesktop}\TileStart"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+Name: "{group}\TileStart"; Filename: "{app}\{#AppExeName}"; Check: not IsPortableUpdate
+Name: "{autodesktop}\TileStart"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon; Check: not IsPortableUpdate
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "TileStart"; ValueData: """{app}\{#AppExeName}"""; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\*\shell\TileStart.AddToAppList"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\*\shell\TileStart.PinTile"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Directory\shell\TileStart.AddToAppList"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Directory\shell\TileStart.PinTile"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Drive\shell\TileStart.AddToAppList"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Drive\shell\TileStart.PinTile"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.exe\shell\TileStart.AddToAppList"; Flags: deletekey
-Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.exe\shell\TileStart.PinTile"; Flags: deletekey
-Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.lnk\shell\TileStart.AddToAppList"; Flags: deletekey
-Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.lnk\shell\TileStart.PinTile"; Flags: deletekey
-Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.appref-ms\shell\TileStart.AddToAppList"; Flags: deletekey
-Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.appref-ms\shell\TileStart.PinTile"; Flags: deletekey
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "TileStart"; ValueData: """{app}\{#AppExeName}"""; Flags: uninsdeletevalue; Check: not IsPortableUpdate
+Root: HKCU; Subkey: "Software\Classes\*\shell\TileStart.AddToAppList"; Flags: uninsdeletekey; Check: not IsPortableUpdate
+Root: HKCU; Subkey: "Software\Classes\*\shell\TileStart.PinTile"; Flags: uninsdeletekey; Check: not IsPortableUpdate
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\TileStart.AddToAppList"; Flags: uninsdeletekey; Check: not IsPortableUpdate
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\TileStart.PinTile"; Flags: uninsdeletekey; Check: not IsPortableUpdate
+Root: HKCU; Subkey: "Software\Classes\Drive\shell\TileStart.AddToAppList"; Flags: uninsdeletekey; Check: not IsPortableUpdate
+Root: HKCU; Subkey: "Software\Classes\Drive\shell\TileStart.PinTile"; Flags: uninsdeletekey; Check: not IsPortableUpdate
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.exe\shell\TileStart.AddToAppList"; Flags: deletekey; Check: not IsPortableUpdate
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.exe\shell\TileStart.PinTile"; Flags: deletekey; Check: not IsPortableUpdate
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.lnk\shell\TileStart.AddToAppList"; Flags: deletekey; Check: not IsPortableUpdate
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.lnk\shell\TileStart.PinTile"; Flags: deletekey; Check: not IsPortableUpdate
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.appref-ms\shell\TileStart.AddToAppList"; Flags: deletekey; Check: not IsPortableUpdate
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.appref-ms\shell\TileStart.PinTile"; Flags: deletekey; Check: not IsPortableUpdate
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Parameters: "--configure-nvidia-overlay"; Flags: runhidden waituntilterminated; StatusMsg: "正在配置 NVIDIA Overlay 兼容性..."
-Filename: "{app}\{#AppExeName}"; Description: "启动 TileStart"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}"; Parameters: "--configure-nvidia-overlay"; Flags: runhidden waituntilterminated; StatusMsg: "正在配置 NVIDIA Overlay 兼容性..."; Check: not IsPortableUpdate
+Filename: "{app}\{#AppExeName}"; Description: "启动 TileStart"; Flags: nowait postinstall skipifsilent; Check: not IsPortableUpdate
 
 [Code]
+function IsPortableUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:TILESTARTUPDATE|}') = 'portable';
+end;
+
+function IsSelfUpdate: Boolean;
+begin
+  Result := IsPortableUpdate or (ExpandConstant('{param:TILESTARTUPDATE|}') = 'installed');
+end;
+
 function DirectoryIsEmpty(const Directory: String): Boolean;
 var
   FindRec: TFindRec;
@@ -117,6 +138,15 @@ begin
 
   if IsRootDirectory(InstallDirectory) then
     ErrorMessage := '不能将 TileStart 直接安装到磁盘或共享根目录。请选择专用的 TileStart 子目录。'
+  else if IsPortableUpdate then
+  begin
+    if IsAdminInstallMode or IsExistingTileStartDirectory(InstallDirectory) or
+      not FileExists(AddBackslash(InstallDirectory) + 'TileStart.Host.exe') or
+      not FileExists(AddBackslash(InstallDirectory) + 'TileStart.Host.dll') then
+      ErrorMessage := '更新目标必须是现有的 TileStart 便携版目录。';
+  end
+  else if IsSelfUpdate and not IsExistingTileStartDirectory(InstallDirectory) then
+    ErrorMessage := '更新目标必须是现有的 TileStart 安装目录。'
   else if DirExists(InstallDirectory) and not DirectoryIsEmpty(InstallDirectory) and
     not IsExistingTileStartDirectory(InstallDirectory) then
     ErrorMessage := '所选目录已包含其他内容，并且不是现有的 TileStart 安装目录。' + #13#10 +
@@ -162,7 +192,7 @@ begin
     Exec(AppPath, '--shutdown', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 
-  if not WaitForTileStartHost(10000) then
+  if not WaitForTileStartHost(10000) and not IsSelfUpdate then
   begin
     { Killing only the Host still lets its watcher observe the process exit and
       unload the Explorer hook. Never kill the Injector directly. }
@@ -173,20 +203,59 @@ begin
   Result := WaitForTileStartHost(10000);
 end;
 
+#ifdef PatchDirectory
+function PatchBaselineMatches: Boolean;
+var
+  Lines: TArrayOfString;
+  I: Integer;
+  BasePath, Path, InstalledVersion: String;
+begin
+  Result := False;
+  BasePath := AddBackslash(ExpandConstant('{app}'));
+  try
+    ExtractTemporaryFile('TileStart-Update.txt');
+    if not LoadStringsFromFile(ExpandConstant('{tmp}\TileStart-Update.txt'), Lines) then
+      exit;
+    if (GetArrayLength(Lines) < 3) or (Lines[0] <> 'TileStart.Update.v1') then
+      exit;
+    if not GetVersionNumbersString(BasePath + 'TileStart.Host.exe', InstalledVersion) or
+      (InstalledVersion <> Lines[1] + '.0') then
+      exit;
+    for I := 2 to GetArrayLength(Lines) - 1 do
+    begin
+      Path := Copy(Lines[I], 67, MaxInt);
+      StringChangeEx(Path, '/', '\', True);
+      if not FileExists(BasePath + Path) or
+        (CompareText(GetSHA256OfFile(BasePath + Path), Copy(Lines[I], 1, 64)) <> 0) then
+        exit;
+    end;
+    Result := True;
+  except
+    Log(GetExceptionMessage);
+  end;
+end;
+#endif
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   if not ValidateInstallDirectory(Result) then
     exit;
 
   if StopTileStart then
-    Result := ''
+  begin
+    Result := '';
+#ifdef PatchDirectory
+    if not PatchBaselineMatches then
+      Result := '热补丁与现有版本或文件不匹配。请重新检查更新以使用完整安装包。';
+#endif
+  end
   else
     Result := '无法安全停止 TileStart。为避免影响 Windows 资源管理器，安装已中止。请重启 Windows 后重试。';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssPostInstall then
+  if (CurStep = ssPostInstall) and not IsPortableUpdate then
     SaveStringToFile(ExpandConstant('{app}\.tilestart-installation'),
       'TileStart installation directory', False);
 end;

@@ -96,19 +96,8 @@ jobs:
         shell: pwsh
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
-        run: .\scripts\Build-Package.ps1 -Version $env:VERSION
-
-      - name: Stage release assets
-        shell: pwsh
-        run: |
-          $releaseRoot = 'artifacts/release-assets'
-          if (Test-Path -LiteralPath $releaseRoot) {
-            Remove-Item -LiteralPath $releaseRoot -Recurse -Force
-          }
-          New-Item -ItemType Directory -Path $releaseRoot | Out-Null
-          Copy-Item 'artifacts/installer/TileStart-Setup-win-x64.exe' $releaseRoot
-          Copy-Item 'artifacts/package/TileStart-portable-win-x64.zip' $releaseRoot
-          Copy-Item 'artifacts/package/SHA256SUMS.txt' $releaseRoot
+          GH_TOKEN: ${{ github.token }}
+        run: .\scripts\Build-Package.ps1 -Version $env:VERSION -ReleaseRepository $env:GITHUB_REPOSITORY
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -154,13 +143,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-        run: >-
-          gh release upload "$RELEASE_TAG"
-          release-assets/TileStart-Setup-win-x64.exe
-          release-assets/TileStart-portable-win-x64.zip
-          release-assets/SHA256SUMS.txt
-          --repo "$GITHUB_REPOSITORY"
-          --clobber
+        run: |
+          assets=(release-assets/TileStart-Setup-win-x64.exe release-assets/TileStart-portable-win-x64.zip
+                  release-assets/TileStart-Update.txt release-assets/SHA256SUMS.txt)
+          if [[ -f release-assets/TileStart-Patch-win-x64.exe ]]; then
+            assets+=(release-assets/TileStart-Patch-win-x64.exe)
+          fi
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
 
       - name: Publish release
         env:

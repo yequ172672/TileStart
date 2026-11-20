@@ -1,4 +1,8 @@
 using System.IO;
+using System.Net;
+using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using TileStart.Host.Updates;
 
 namespace TileStart.Host.Tests;
@@ -108,6 +112,93 @@ public sealed class GitHubUpdateServiceTests
 
         Assert.NotEqual(first, second);
         Assert.Contains(Path.Combine("TileStart", "updates", "v0.2.0"), first, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(true, true, true, "patch", UpdatePackageKind.PatchInstaller)]
+    [InlineData(false, true, true, "patch", UpdatePackageKind.PatchInstaller)]
+    [InlineData(true, false, true, "patch", UpdatePackageKind.Installer)]
+    [InlineData(false, true, false, "patch", UpdatePackageKind.Installer)]
+    [InlineData(true, true, true, "corrupt patch", UpdatePackageKind.Installer)]
+    [InlineData(false, true, true, "full only", UpdatePackageKind.Installer)]
+    [InlineData(false, true, true, "legacy", UpdatePackageKind.PortableArchive)]
+    public async Task DownloadsVerifiedPatchOrAutomaticallyFallsBackToFullPackage(
+        bool installed, bool versionMatches, bool hashMatches, string releaseType, UpdatePackageKind expected)
+    {
+        const string patchName = "TileStart-Patch-win-x64.exe";
+        const string manifestName = "TileStart-Update.txt";
+        const string downloadRoot = "https://github.com/yequ172672/TileStart/releases/download/v0.2.0/";
+        var hasPatch = releaseType is "patch" or "corrupt patch";
+        var release = GitHubUpdateService.ParseRelease(ReleaseJson) with
+        {
+            PatchInstaller = hasPatch ? new GitHubReleaseAsset(patchName, new Uri(downloadRoot + patchName)) : null,
+            UpdateManifest = releaseType != "legacy" ? new GitHubReleaseAsset(manifestName, new Uri(downloadRoot + manifestName)) : null,
+        };
+        var assets = new Dictionary<string, string>
+        {
+            [release.Installer.Name] = "complete installer",
+            [release.PortableArchive.Name] = "portable archive",
+            [patchName] = "small installer",
+            [manifestName] = hasPatch
+                ? $"TileStart.Update.v1\n0.1.9\n{Hash("baseline host")} *TileStart.Host.dll\n"
+                : "TileStart.Update.v1\n-\n",
+        };
+        assets[release.Checksums.Name] = string.Join('\n', assets.Select(asset => $"{Hash(asset.Value)} *{asset.Key}"));
+        if (releaseType == "corrupt patch")
+        {
+            assets[patchName] = "unexpected content";
+        }
+
+        using var client = new HttpClient(new ReleaseAssetHandler(assets));
+        var directory = Directory.CreateTempSubdirectory("tilestart-update-baseline-");
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(directory.FullName, "TileStart.Host.dll"),
+                hashMatches ? "baseline host" : "locally modified host");
+            if (installed)
+            {
+                File.WriteAllText(Path.Combine(directory.FullName, "unins000.exe"), string.Empty);
+            }
+
+            var service = new GitHubUpdateService(client);
+            var current = versionMatches ? new Version(0, 1, 9, 0) : new Version(0, 1, 8);
+            var result = await service.DownloadAsync(release, current, Path.Combine(directory.FullName, "TileStart.Host.exe"));
+            try
+            {
+                Assert.Equal(expected, result.Kind);
+                Assert.Equal(Hash(assets[Path.GetFileName(result.Path)]), result.Sha256);
+            }
+            finally
+            {
+                File.Delete(result.Path);
+                Directory.Delete(Path.GetDirectoryName(result.Path)!);
+            }
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("../TileStart.Host.dll")]
+    [InlineData("bin/./TileStart.Host.dll")]
+    [InlineData("C:/TileStart.Host.dll")]
+    public void RejectsInvalidBaselinePaths(string path)
+    {
+        var manifest = $"TileStart.Update.v1\n0.1.9\n{Hash("base")} *TileStart.Host.dll\n{Hash("other")} *{path}\n";
+        Assert.Throws<InvalidDataException>(() => UpdateReleaseManifest.Parse(manifest));
+    }
+
+    private static string Hash(string content) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
+
+    private sealed class ReleaseAssetHandler(IReadOnlyDictionary<string, string> assets) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(assets[request.RequestUri!.Segments[^1]], Encoding.UTF8),
+            });
     }
 
     [Theory]
