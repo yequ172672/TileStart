@@ -758,6 +758,7 @@ public class StartWindowController : IDisposable
     private void SnapWindowWidthAfterResize()
     {
         var currentWidth = _window.ActualWidth > 0 ? _window.ActualWidth : _window.Width;
+        var currentHeight = _window.ActualHeight > 0 ? _window.ActualHeight : _window.Height;
         var targetWidth = StartWindowSizing.SnapWidth(currentWidth, _window.MaxWidth);
         var calculatedColumns = StartWindowSizing.ColumnsForWidth(targetWidth, _window.MaxWidth);
         var previousGroupPositions = _captureGroupReorderPositions();
@@ -765,11 +766,14 @@ public class StartWindowController : IDisposable
         // repeated WPF measure/arrange passes. That looks acceptable on a fast GPU but
         // becomes delayed under software rendering, remote sessions, and slower machines.
         // Snap the native window once; only the lightweight group transforms animate.
-        // PositionOnCurrentMonitor treats the preferred column count as the source of truth,
-        // so publish the newly selected count before it recalculates the window placement.
-        // Reversing this order immediately restores the old width and makes expansion appear
-        // impossible even though the pointer reached the wider column boundary.
+        // Placement uses the preferred size. Preserve both dimensions before it can restore
+        // the old width or undo the vertical part of a corner resize.
         _preferredWorkspaceColumns = calculatedColumns;
+        if (!_isDisplayChangePending && double.IsFinite(currentHeight) && currentHeight > 0)
+        {
+            _preferredHeight = currentHeight;
+        }
+
         _window.Width = targetWidth;
         PositionOnCurrentMonitor();
         _window.UpdateLayout();

@@ -123,6 +123,20 @@ public sealed class PerformanceGuardTests
     }
 
     [Fact]
+    public void WindowWidthSnapKeepsTheHeightFromACornerResize()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "TestData", "Performance", "StartWindowController.cs");
+        var source = File.ReadAllText(path);
+        var method = source[source.IndexOf("private void SnapWindowWidthAfterResize()", StringComparison.Ordinal)..];
+        method = method[..method.IndexOf("private void BeginLiveResize()", StringComparison.Ordinal)];
+
+        var captureHeight = method.IndexOf("_preferredHeight = currentHeight;", StringComparison.Ordinal);
+        var placeWindow = method.IndexOf("PositionOnCurrentMonitor();", StringComparison.Ordinal);
+        Assert.True(captureHeight >= 0 && captureHeight < placeWindow,
+            "Placement must read the height from the completed resize before it saves the snapped window size.");
+    }
+
+    [Fact]
     public void LiveResizeTemporarilyDisablesAcrylicComposition()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "TestData", "Performance", "StartWindowController.cs");
