@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Navigation;
 using TileStart.Host.Updates;
 using TileStart.Host.Windowing;
 
@@ -25,17 +26,25 @@ public partial class AboutWindow : Window
         await _checkForUpdates(this);
     }
 
-    private void OpenProject_Click(object sender, RoutedEventArgs e)
+    private void OpenProject_Click(object sender, RoutedEventArgs e) => OpenLink(ProjectUri);
+
+    private void MaintainerLink_RequestNavigate(object sender, RequestNavigateEventArgs e)
+    {
+        e.Handled = true;
+        OpenLink(e.Uri);
+    }
+
+    private void OpenLink(Uri uri)
     {
         try
         {
-            Process.Start(new ProcessStartInfo(ProjectUri.AbsoluteUri) { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
         }
         catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
         {
             TileStartMessageDialog.Show(
                 this,
-                "无法打开项目页面",
+                "无法打开链接",
                 exception.Message,
                 TileStartMessageKind.Error);
         }

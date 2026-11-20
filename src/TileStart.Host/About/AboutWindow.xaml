@@ -128,13 +128,24 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="10" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="10" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <TextBlock Foreground="{StaticResource TileStartTextSecondaryBrush}" Text="支持系统" />
                         <TextBlock Grid.Column="1" Text="Windows 10 / Windows 11 · x64" />
                         <TextBlock Grid.Row="2"
                                    Foreground="{StaticResource TileStartTextSecondaryBrush}"
-                                   Text="项目作者" />
+                                   Text="原项目作者" />
                         <TextBlock Grid.Row="2" Grid.Column="1" Text="Narylr350" />
+                        <TextBlock Grid.Row="4"
+                                   Foreground="{StaticResource TileStartTextSecondaryBrush}"
+                                   Text="分叉维护" />
+                        <TextBlock Grid.Row="4" Grid.Column="1">
+                            <Run Text="夜曲_flac · " />
+                            <Hyperlink NavigateUri="https://space.bilibili.com/93825767"
+                                       RequestNavigate="MaintainerLink_RequestNavigate"
+                                       Foreground="{StaticResource TileStartTextPrimaryBrush}">B 站主页</Hyperlink>
+                        </TextBlock>
                     </Grid>
                 </Border>
             </Grid>

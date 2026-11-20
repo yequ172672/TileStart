@@ -21,6 +21,8 @@
 
 TileStart 在 Windows 11 上重新实现 Windows 10 的磁贴开始菜单：保留应用列表、分组磁贴和熟悉的操作方式，同时支持固定普通文件、便携软件、脚本、网址与自定义命令。
 
+本仓库是 [Narylr350/TileStart](https://github.com/Narylr350/TileStart) 的分叉维护版，由 **夜曲_flac** 维护。[B 站主页](https://space.bilibili.com/93825767)
+
 > [!WARNING]
 > 当前安装器和可执行文件尚未进行 Authenticode 代码签名，Windows Defender SmartScreen 可能显示“未知发布者”。请只从本仓库的 [Releases](https://github.com/yequ172672/TileStart/releases) 页面下载，并用随 Release 提供的 `SHA256SUMS.txt` 校验文件。
 
