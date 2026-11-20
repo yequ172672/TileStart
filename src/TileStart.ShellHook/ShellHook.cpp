@@ -367,14 +367,26 @@ namespace
         }
     }
 
+    bool IsStartButtonHit(HWND start_button, POINT point)
+    {
+        RECT bounds{};
+        if (!GetWindowRect(start_button, &bounds) || !PtInRect(&bounds, point))
+        {
+            return false;
+        }
+
+        // Win11 may render the button in the taskbar while its Start HWND is hidden.
+        const HWND taskbar = GetAncestor(start_button, GA_ROOT);
+        const HWND hit_window = WindowFromPoint(point);
+        return taskbar != nullptr && hit_window != nullptr && GetAncestor(hit_window, GA_ROOT) == taskbar;
+    }
+
     LRESULT CALLBACK MouseHook(int code, WPARAM message, LPARAM data)
     {
         if (code == HC_ACTION && message == WM_LBUTTONDOWN && g_start_button != nullptr)
         {
             const auto* mouse = reinterpret_cast<const MSLLHOOKSTRUCT*>(data);
-            RECT start_button_rect{};
-            if (GetWindowRect(g_start_button, &start_button_rect) && PtInRect(&start_button_rect, mouse->pt) &&
-                RequestHostOpen())
+            if (IsStartButtonHit(g_start_button, mouse->pt) && RequestHostOpen())
             {
                 return 1;
             }
