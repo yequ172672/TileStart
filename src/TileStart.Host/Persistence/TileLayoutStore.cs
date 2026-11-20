@@ -93,7 +93,9 @@ public static class TileLayoutStore
         return layout;
     }
 
-    public static void Save(TileLayout layout)
+    public static void Save(TileLayout layout) => TrySave(layout);
+
+    internal static bool TrySave(TileLayout layout)
     {
         try
         {
@@ -101,6 +103,7 @@ public static class TileLayoutStore
             var temporaryPath = FilePath + ".tmp";
             File.WriteAllText(temporaryPath, Serialize(layout));
             File.Move(temporaryPath, FilePath, true);
+            return true;
         }
         catch (IOException exception)
         {
@@ -110,5 +113,7 @@ public static class TileLayoutStore
         {
             DiagnosticLog.Write($"Unable to write tile layout: {exception.Message}");
         }
+
+        return false;
     }
 }

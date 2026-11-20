@@ -227,7 +227,8 @@ public partial class App : System.Windows.Application
                 _appearancePreferences.ColorMode,
                 OpenBackupAndRestore,
                 OpenAbout,
-                ChangeAppearance);
+                ChangeAppearance,
+                ((MainWindow)MainWindow).ImportNativeStartPinsAsync);
             _settingsWindow = dialog;
             var owner = ResolveSettingsOwner(dialog);
             if (owner is not null)

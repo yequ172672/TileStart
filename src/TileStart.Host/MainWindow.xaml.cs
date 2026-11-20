@@ -170,6 +170,9 @@ public partial class MainWindow : Window
 
     public void ShowFromShell() => _appController.ShowFromShellWhenReady();
 
+    internal Task<NativeStartImportResult> ImportNativeStartPinsAsync(CancellationToken cancellationToken) =>
+        _tileWorkspaceController.ImportNativeStartPinsAsync(cancellationToken);
+
     public void AllowClose() => _controller.AllowClose();
 
     public void PrepareForApplicationRestart()

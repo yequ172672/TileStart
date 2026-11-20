@@ -1,5 +1,22 @@
 # TileStart 本地工作指令
 
+## Windows 11 固定项导入
+
+### Key Files
+
+| 文件 | 用途 |
+| --- | --- |
+| `src/TileStart.Host/Applications/NativeStartPins.cs` | 导出和解析当前用户的原生固定项，为新增磁贴生成分组。 |
+| `tests/TileStart.Host.Tests/NativeStartPinsTests.cs` | 验证快捷方式、应用 ID、导出顺序和重复导入。 |
+
+### Dependencies
+
+- 使用 Windows 11 自带的 Windows PowerShell 和 `Export-StartLayout`，通过应用目录解析应用 ID。
+
+### Common Patterns
+
+- 导入由设置页显式触发。解析和图标加载完成后，先将新增分组写入布局文件，再刷新当前磁贴区。重复导入按启动目标去重。
+
 ## 持续工作与提交边界
 
 - Win10/Win11 视觉复刻、平台适配等由多个连续批次组成的长期任务中，用户对某一批回复“ok”“可以”“继续”等，只表示该批效果可继续推进，不代表整个工作轮已经完成。

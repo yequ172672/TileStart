@@ -1,6 +1,9 @@
+using System.ComponentModel;
 using System.IO;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
+using TileStart.Host.Applications;
 using TileStart.Host.Shell;
 using TileStart.Host.Themes;
 using TileStart.Host.Utilities;
@@ -14,6 +17,7 @@ public partial class SettingsWindow : Window
     private readonly Action<Window> _openBackupAndRestore;
     private readonly Action<Window> _openAbout;
     private readonly Action<AppThemeStyle, AppColorMode> _changeAppearance;
+    private readonly Func<CancellationToken, Task<NativeStartImportResult>> _importNativePins;
     private readonly bool _initialStartupEnabled;
 
     public AppThemeStyle SelectedThemeStyle { get; private set; }
@@ -27,7 +31,8 @@ public partial class SettingsWindow : Window
         AppColorMode currentColorMode,
         Action<Window> openBackupAndRestore,
         Action<Window> openAbout,
-        Action<AppThemeStyle, AppColorMode> changeAppearance)
+        Action<AppThemeStyle, AppColorMode> changeAppearance,
+        Func<CancellationToken, Task<NativeStartImportResult>> importNativePins)
     {
         InitializeComponent();
         SelectedThemeStyle = currentThemeStyle;
@@ -35,6 +40,10 @@ public partial class SettingsWindow : Window
         _openBackupAndRestore = openBackupAndRestore;
         _openAbout = openAbout;
         _changeAppearance = changeAppearance;
+        _importNativePins = importNativePins;
+        NativePinsSection.Visibility = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         _initialStartupEnabled = StartupRegistration.IsEnabled();
         SelectedStartupEnabled = _initialStartupEnabled;
         StartupBox.IsChecked = _initialStartupEnabled;
@@ -104,6 +113,38 @@ public partial class SettingsWindow : Window
     private void About_Click(object sender, RoutedEventArgs e)
     {
         _openAbout(this);
+    }
+
+    private async void ImportNativePins_Click(object sender, RoutedEventArgs e)
+    {
+        using var cancellation = new CancellationTokenSource();
+        void CancelOnClose(object? _, EventArgs __) => cancellation.Cancel();
+        Closed += CancelOnClose;
+        ImportNativePinsButton.IsEnabled = false;
+        NativePinsStatus.Visibility = Visibility.Visible;
+        NativePinsStatus.Text = "正在读取 Windows 固定项…";
+        try
+        {
+            var result = await _importNativePins(cancellation.Token);
+            NativePinsStatus.Text = $"已导入 {result.Added} 项，已在磁贴区 {result.Existing} 项，无法导入 {result.Unavailable} 项。";
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException
+                                          or InvalidOperationException or Win32Exception or JsonException
+                                          or TimeoutException or System.Runtime.InteropServices.COMException)
+        {
+            DiagnosticLog.Write($"Native Start pins import failed: {exception}");
+            NativePinsStatus.Text = exception is TimeoutException
+                ? "读取 Windows 固定项超时，请重试。"
+                : "无法导入 Windows 固定项。请查看诊断日志。";
+        }
+        finally
+        {
+            Closed -= CancelOnClose;
+            ImportNativePinsButton.IsEnabled = true;
+        }
     }
 
     private void ExportDiagnostics_Click(object sender, RoutedEventArgs e)

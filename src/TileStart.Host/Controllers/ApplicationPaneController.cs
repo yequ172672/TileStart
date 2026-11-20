@@ -1065,7 +1065,7 @@ internal sealed class ApplicationPaneController : IDisposable
         return completion.Task;
     }
 
-    private static Task<T> RunStaThreadAsync<T>(Func<T> action, string name)
+    internal static Task<T> RunStaThreadAsync<T>(Func<T> action, string name)
     {
         var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>

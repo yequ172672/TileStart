@@ -244,6 +244,36 @@
                                Text="维护与信息" />
                     <Border Padding="18,16" Style="{StaticResource TileStartCardStyle}">
                         <StackPanel>
+                            <StackPanel x:Name="NativePinsSection">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Margin="0,0,12,0" VerticalAlignment="Center">
+                                        <TextBlock FontSize="13" Text="Windows 11 固定项" />
+                                        <TextBlock Margin="0,4,0,0"
+                                                   Foreground="{StaticResource TileStartTextSecondaryBrush}"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   Text="从系统开始菜单读取固定应用，将新增项放入一个磁贴分组。" />
+                                    </StackPanel>
+                                    <Button x:Name="ImportNativePinsButton"
+                                            Grid.Column="1"
+                                            Width="92"
+                                            Style="{StaticResource TileStartButtonStyle}"
+                                            Content="导入固定项"
+                                            Click="ImportNativePins_Click" />
+                                </Grid>
+                                <TextBlock x:Name="NativePinsStatus"
+                                           Margin="0,8,0,0"
+                                           FontSize="11"
+                                           Foreground="{StaticResource TileStartTextSecondaryBrush}"
+                                           AutomationProperties.LiveSetting="Polite"
+                                           TextWrapping="Wrap"
+                                           Visibility="Collapsed" />
+                                <Border Height="1" Margin="0,14" Background="{StaticResource TileStartDividerBrush}" />
+                            </StackPanel>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />

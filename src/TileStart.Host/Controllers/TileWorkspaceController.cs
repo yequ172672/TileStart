@@ -323,6 +323,37 @@ internal sealed class TileWorkspaceController : IDisposable
         return false;
     }
 
+    public async Task<NativeStartImportResult> ImportNativeStartPinsAsync(CancellationToken cancellationToken)
+    {
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetimeToken);
+        var json = await NativeStartPins.ExportAsync(cancellation.Token);
+        var apps = AppEntry.FlattenApplications(await StartAppScanner.ScanAsync()).ToArray();
+        var resolved = await ApplicationPaneController.RunStaThreadAsync(() =>
+        {
+            cancellation.Token.ThrowIfCancellationRequested();
+            var pins = NativeStartPins.Resolve(json, apps);
+            var preview = new TileLayout { Groups = [new TileGroup { Tiles = [.. pins.Tiles] }] };
+            ApplicationPaneController.RestoreTileIcons(preview, apps);
+            return pins;
+        }, "TileStart Native Start Pins");
+
+        cancellation.Token.ThrowIfCancellationRequested();
+        var group = NativeStartPins.BuildGroup(_tileLayout, resolved.Tiles);
+        if (group.Tiles.Count > 0)
+        {
+            var staged = new TileLayout { Groups = [.. _tileLayout.Groups, group] };
+            if (!TileLayoutStore.TrySave(staged))
+            {
+                throw new System.IO.IOException("无法保存磁贴布局。");
+            }
+
+            _tileLayout.Groups.Add(group);
+        }
+
+        return new NativeStartImportResult(
+            group.Tiles.Count, resolved.Tiles.Count - group.Tiles.Count, resolved.Unavailable);
+    }
+
     // ── Tile actions ──────────────────────────────────────────────
 
     public void TileButton_Click(object sender, RoutedEventArgs e)
