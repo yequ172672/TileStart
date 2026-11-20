@@ -1,11 +1,10 @@
-using TileStart.Host;
-
 namespace TileStart.Host.Tests;
 
 public sealed class WinKeyHookTests
 {
     private const uint LeftWin = 0x5B;
     private const uint RightWin = 0x5C;
+    private const uint Control = 0xA2;
     private const uint Shift = 0x10;
     private const uint E = 0x45;
     private const uint S = 0x53;
@@ -17,42 +16,79 @@ public sealed class WinKeyHookTests
     {
         using var hook = new WinKeyHook(() => { });
 
-        Assert.Equal(WinKeyAction.Suppress, hook.ProcessKey(winKey, keyDown: true, keyUp: false));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(winKey, keyDown: true, keyUp: false));
         Assert.Equal(
-            WinKeyAction.Suppress | WinKeyAction.OpenTileStart,
+            WinKeyAction.OpenTileStart,
             hook.ProcessKey(winKey, keyDown: false, keyUp: true));
     }
 
     [Fact]
-    public void WinShortcutReinjectsChordAndDoesNotOpenTileStart()
+    public void WinShortcutPassesOriginalEventsThrough()
     {
         using var hook = new WinKeyHook(() => { });
 
-        Assert.Equal(WinKeyAction.Suppress, hook.ProcessKey(LeftWin, keyDown: true, keyUp: false));
-        Assert.Equal(
-            WinKeyAction.Suppress | WinKeyAction.InjectWinDown | WinKeyAction.InjectCurrentKeyDown,
-            hook.ProcessKey(E, keyDown: true, keyUp: false));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(LeftWin, keyDown: true, keyUp: false));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(E, keyDown: true, keyUp: false));
         Assert.Equal(WinKeyAction.None, hook.ProcessKey(E, keyDown: false, keyUp: true));
-        Assert.Equal(
-            WinKeyAction.Suppress | WinKeyAction.InjectWinUp,
-            hook.ProcessKey(LeftWin, keyDown: false, keyUp: true));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(LeftWin, keyDown: false, keyUp: true));
     }
 
     [Fact]
-    public void MultiKeyShortcutOnlyReinjectsFirstChordKey()
+    public void WinShiftSIsPassedThroughWithoutReplay()
     {
         using var hook = new WinKeyHook(() => { });
 
-        hook.ProcessKey(LeftWin, keyDown: true, keyUp: false);
-        Assert.Equal(
-            WinKeyAction.Suppress | WinKeyAction.InjectWinDown | WinKeyAction.InjectCurrentKeyDown,
-            hook.ProcessKey(Shift, keyDown: true, keyUp: false));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(LeftWin, keyDown: true, keyUp: false));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(Shift, keyDown: true, keyUp: false));
         Assert.Equal(WinKeyAction.None, hook.ProcessKey(S, keyDown: true, keyUp: false));
         Assert.Equal(WinKeyAction.None, hook.ProcessKey(S, keyDown: false, keyUp: true));
         Assert.Equal(WinKeyAction.None, hook.ProcessKey(Shift, keyDown: false, keyUp: true));
-        Assert.Equal(
-            WinKeyAction.Suppress | WinKeyAction.InjectWinUp,
-            hook.ProcessKey(LeftWin, keyDown: false, keyUp: true));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(LeftWin, keyDown: false, keyUp: true));
+    }
+
+    [Theory]
+    [InlineData(LeftWin)]
+    [InlineData(RightWin)]
+    public void ModifierOnlyVoiceShortcutPassesOriginalWinDownEvenWhenWinIsLast(uint winKey)
+    {
+        using var hook = new WinKeyHook(() => { });
+
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(Control, keyDown: true, keyUp: false));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(Shift, keyDown: true, keyUp: false));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(winKey, keyDown: true, keyUp: false, anotherKeyHeld: true));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(winKey, keyDown: false, keyUp: true));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(Shift, keyDown: false, keyUp: true));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(Control, keyDown: false, keyUp: true));
+    }
+
+    [Theory]
+    [InlineData(LeftWin)]
+    [InlineData(RightWin)]
+    public void ModifierOnlyVoiceShortcutPassesThroughWhenWinIsFirst(uint winKey)
+    {
+        using var hook = new WinKeyHook(() => { });
+
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(winKey, keyDown: true, keyUp: false));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(Control, keyDown: true, keyUp: false));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(Shift, keyDown: true, keyUp: false));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(Control, keyDown: false, keyUp: true));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(Shift, keyDown: false, keyUp: true));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(winKey, keyDown: true, keyUp: false));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(winKey, keyDown: false, keyUp: true));
+
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(winKey, keyDown: true, keyUp: false));
+        Assert.Equal(WinKeyAction.OpenTileStart, hook.ProcessKey(winKey, keyDown: false, keyUp: true));
+    }
+
+    [Fact]
+    public void OverlappingLeftAndRightWinKeysDoNotOpenTileStart()
+    {
+        using var hook = new WinKeyHook(() => { });
+
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(LeftWin, keyDown: true, keyUp: false));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(RightWin, keyDown: true, keyUp: false));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(LeftWin, keyDown: false, keyUp: true));
+        Assert.Equal(WinKeyAction.None, hook.ProcessKey(RightWin, keyDown: false, keyUp: true));
     }
 
     [Fact]

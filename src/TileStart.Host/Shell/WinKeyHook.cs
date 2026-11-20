@@ -13,9 +13,10 @@ public sealed class WinKeyHook : IDisposable
     private const int WmSysKeyUp = 0x0105;
     private const uint VkLwin = 0x5B;
     private const uint VkRwin = 0x5C;
+    private const ushort VkMenuMask = 0xE8;
+    private const uint InputKeyboard = 1;
     private const uint KeyEventExtendedKey = 0x0001;
     private const uint KeyEventKeyUp = 0x0002;
-    private const uint LlkhfExtended = 0x00000001;
     private const uint LlkhfInjected = 0x00000010;
     private const string NativeStartBypassEventName = @"Local\TileStart.NativeStart.Bypass";
 
@@ -26,9 +27,8 @@ public sealed class WinKeyHook : IDisposable
     private readonly Action _onStandaloneWinKey;
     private readonly HookProcedure _callback;
     private nint _hook;
-    private bool _winKeyDown;
-    private bool _winKeyChord;
-    private uint _winVirtualKey;
+    private uint _winKeysDown;
+    private uint _standaloneWinKey;
 
     public WinKeyHook(Action onStandaloneWinKey)
     {
@@ -55,20 +55,14 @@ public sealed class WinKeyHook : IDisposable
 
     public void Dispose()
     {
-        if (_winKeyChord)
-        {
-            InjectKey((ushort)_winVirtualKey, 0, KeyEventExtendedKey | KeyEventKeyUp);
-        }
-
         if (_hook != 0)
         {
             UnhookWindowsHookEx(_hook);
             _hook = 0;
         }
 
-        _winKeyDown = false;
-        _winKeyChord = false;
-        _winVirtualKey = 0;
+        _winKeysDown = 0;
+        _standaloneWinKey = 0;
     }
 
     private nint Callback(int code, nint message, nint data)
@@ -84,77 +78,105 @@ public sealed class WinKeyHook : IDisposable
             return CallNextHookEx(_hook, code, message, data);
         }
 
-        var action = ProcessKey(
-            key.VirtualKey,
-            message is WmKeyDown or WmSysKeyDown,
-            message is WmKeyUp or WmSysKeyUp);
-        if (action.HasFlag(WinKeyAction.InjectWinDown))
-        {
-            InjectKey((ushort)_winVirtualKey, 0, KeyEventExtendedKey);
-        }
+        var keyDown = message is WmKeyDown or WmSysKeyDown;
+        var keyUp = message is WmKeyUp or WmSysKeyUp;
+        var winKey = key.VirtualKey is VkLwin or VkRwin;
+        var action = ProcessKey(key.VirtualKey, keyDown, keyUp,
+            keyDown && winKey && _winKeysDown == 0 && IsAnyKeyboardKeyDown());
 
-        if (action.HasFlag(WinKeyAction.InjectCurrentKeyDown))
-        {
-            InjectKey((ushort)key.VirtualKey, (ushort)key.ScanCode,
-                (key.Flags & LlkhfExtended) != 0 ? KeyEventExtendedKey : 0);
-        }
-
-        if (action.HasFlag(WinKeyAction.InjectWinUp))
-        {
-            InjectKey((ushort)key.VirtualKey, 0, KeyEventExtendedKey | KeyEventKeyUp);
-        }
-
-        if (key.VirtualKey is VkLwin or VkRwin)
+        if (winKey)
         {
             QueueDiagnostic(
                 $"Win-key event: message=0x{message.ToInt64():X}, vk=0x{key.VirtualKey:X}, flags=0x{key.Flags:X}, " +
                 $"extra=0x{key.ExtraInfo:X}, action={action}.");
         }
 
-        if (action.HasFlag(WinKeyAction.OpenTileStart))
+        // Always let the rest of the hook chain observe the original events.
+        var next = CallNextHookEx(_hook, code, message, data);
+        if (next != 0 || action != WinKeyAction.OpenTileStart || !TryMaskStandaloneRelease(key))
         {
-            _onStandaloneWinKey();
+            return next;
         }
 
-        return action.HasFlag(WinKeyAction.Suppress)
-            ? 1
-            : CallNextHookEx(_hook, code, message, data);
+        _onStandaloneWinKey();
+        return 1;
     }
 
-    internal WinKeyAction ProcessKey(uint virtualKey, bool keyDown, bool keyUp)
+    internal WinKeyAction ProcessKey(uint virtualKey, bool keyDown, bool keyUp, bool anotherKeyHeld = false)
     {
-        var winKey = virtualKey is VkLwin or VkRwin;
-        if (keyDown && winKey)
+        var winKeyBit = virtualKey switch
         {
-            if (!_winKeyDown)
+            VkLwin => 1u,
+            VkRwin => 2u,
+            _ => 0u,
+        };
+
+        if (keyDown && winKeyBit != 0)
+        {
+            if ((_winKeysDown & winKeyBit) == 0)
             {
-                _winKeyDown = true;
-                _winKeyChord = false;
-                _winVirtualKey = virtualKey;
+                _standaloneWinKey = _winKeysDown == 0 && !anotherKeyHeld ? virtualKey : 0;
+                _winKeysDown |= winKeyBit;
             }
-
-            return WinKeyAction.Suppress;
         }
-
-        if (keyDown && _winKeyDown && !_winKeyChord)
+        else if (keyUp && winKeyBit != 0)
         {
-            _winKeyChord = true;
-            return WinKeyAction.Suppress | WinKeyAction.InjectWinDown | WinKeyAction.InjectCurrentKeyDown;
+            _winKeysDown &= ~winKeyBit;
+            if (_standaloneWinKey == virtualKey)
+            {
+                _standaloneWinKey = 0;
+                return WinKeyAction.OpenTileStart;
+            }
         }
-
-        if (keyUp && winKey && _winKeyDown && virtualKey == _winVirtualKey)
+        else if (keyDown || keyUp)
         {
-            var chord = _winKeyChord;
-            _winKeyDown = false;
-            _winKeyChord = false;
-            _winVirtualKey = 0;
-            return chord
-                ? WinKeyAction.Suppress | WinKeyAction.InjectWinUp
-                : WinKeyAction.Suppress | WinKeyAction.OpenTileStart;
+            _standaloneWinKey = 0;
         }
 
         return WinKeyAction.None;
     }
+
+    private static bool IsAnyKeyboardKeyDown()
+    {
+        // The current Win down has not changed asynchronous state yet. Read the keys held before it.
+        for (var virtualKey = 0x08; virtualKey < 0xFF; virtualKey++)
+        {
+            if (GetAsyncKeyState(virtualKey) < 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryMaskStandaloneRelease(KeyboardData key)
+    {
+        // An unassigned key between Win down and up prevents Windows from opening Start.
+        // Queue the mask and replacement release together so the system still sees a balanced Win press.
+        Input[] inputs =
+        [
+            KeyboardInputEvent(VkMenuMask, 0, 0),
+            KeyboardInputEvent(VkMenuMask, 0, KeyEventKeyUp),
+            KeyboardInputEvent((ushort)key.VirtualKey, (ushort)key.ScanCode, KeyEventExtendedKey | KeyEventKeyUp),
+        ];
+        return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) == inputs.Length;
+    }
+
+    private static Input KeyboardInputEvent(ushort virtualKey, ushort scanCode, uint flags) => new()
+    {
+        Type = InputKeyboard,
+        Data = new InputData
+        {
+            Keyboard = new KeyboardInput
+            {
+                VirtualKey = virtualKey,
+                ScanCode = scanCode,
+                Flags = flags,
+                ExtraInfo = TileStartInjectionMarker,
+            },
+        },
+    };
 
     internal static bool ShouldIgnoreInjectedEvent(uint flags, nuint extraInfo) =>
         (flags & LlkhfInjected) != 0 && extraInfo == TileStartInjectionMarker;
@@ -202,6 +224,41 @@ public sealed class WinKeyHook : IDisposable
         public nuint ExtraInfo;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Input
+    {
+        public uint Type;
+        public InputData Data;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct InputData
+    {
+        [FieldOffset(0)] public KeyboardInput Keyboard;
+        [FieldOffset(0)] public MouseInput Mouse;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KeyboardInput
+    {
+        public ushort VirtualKey;
+        public ushort ScanCode;
+        public uint Flags;
+        public uint Time;
+        public nuint ExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MouseInput
+    {
+        public int X;
+        public int Y;
+        public uint MouseData;
+        public uint Flags;
+        public uint Time;
+        public nuint ExtraInfo;
+    }
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern nint SetWindowsHookExW(int hookType, HookProcedure procedure, nint module, uint threadId);
 
@@ -210,6 +267,12 @@ public sealed class WinKeyHook : IDisposable
 
     [DllImport("user32.dll")]
     private static extern nint CallNextHookEx(nint hook, int code, nint message, nint data);
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int virtualKey);
+
+    [DllImport("user32.dll")]
+    private static extern uint SendInput(uint count, [In] Input[] inputs, int size);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern nint GetModuleHandleW(string? moduleName);
