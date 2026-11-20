@@ -14,6 +14,8 @@ $repoRoot = Split-Path $PSScriptRoot -Parent
 $packageRoot = Join-Path $repoRoot 'artifacts\package'
 $publishDirectory = Join-Path $packageRoot 'TileStart'
 $installer = Join-Path $repoRoot 'artifacts\installer\TileStart-Setup-win-x64.exe'
+$frameworkDependentName = 'TileStart-Setup-no-runtime-win-x64.exe'
+$frameworkDependentInstaller = Join-Path $repoRoot "artifacts\installer\$frameworkDependentName"
 $archiveName = 'TileStart-portable-win-x64.zip'
 $patchName = 'TileStart-Patch-win-x64.exe'
 $manifestName = 'TileStart-Update.txt'
@@ -104,10 +106,10 @@ try {
     $baseline = if ($Repository) { Get-PreviousRelease } else { @{ Archive = (Resolve-Path -LiteralPath $BaselineArchive).Path; Version = $BaselineVersion } }
     $patch = if ($baseline) { Build-Patch $baseline.Archive $baseline.Version }
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-    Copy-Item -LiteralPath $installer, (Join-Path $packageRoot $archiveName) -Destination $Destination -Force
+    Copy-Item -LiteralPath $installer, $frameworkDependentInstaller, (Join-Path $packageRoot $archiveName) -Destination $Destination -Force
     $publishedManifest = Join-Path $Destination $manifestName
     $publishedPatch = Join-Path $Destination $patchName
-    $names = @('TileStart-Setup-win-x64.exe', $archiveName, $manifestName)
+    $names = @('TileStart-Setup-win-x64.exe', $frameworkDependentName, $archiveName, $manifestName)
     if ($patch) {
         Copy-Item -LiteralPath $patch.Manifest -Destination $publishedManifest -Force
         Copy-Item -LiteralPath $patch.Path -Destination $publishedPatch -Force

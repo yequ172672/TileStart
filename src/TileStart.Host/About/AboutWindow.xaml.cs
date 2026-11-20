@@ -18,7 +18,12 @@ public partial class AboutWindow : Window
         _checkForUpdates = checkForUpdates;
         InitializeComponent();
         VersionText.Text = $"版本 {GitHubUpdateService.CurrentVersion.ToString(3)}";
-        EditionText.Text = GitHubUpdateService.IsInstalledCopy(Environment.ProcessPath) ? "安装版" : "便携版";
+        var executablePath = Environment.ProcessPath;
+        EditionText.Text = GitHubUpdateService.IsInstalledCopy(executablePath) ? "安装版" : "便携版";
+        if (GitHubUpdateService.IsFrameworkDependentCopy(executablePath))
+        {
+            EditionText.Text += " · 使用系统 .NET";
+        }
     }
 
     private async void CheckUpdates_Click(object sender, RoutedEventArgs e)

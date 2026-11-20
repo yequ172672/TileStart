@@ -120,6 +120,7 @@ public sealed class GitHubUpdateServiceTests
     [InlineData(true, false, true, "patch", UpdatePackageKind.Installer)]
     [InlineData(false, true, false, "patch", UpdatePackageKind.Installer)]
     [InlineData(true, true, true, "corrupt patch", UpdatePackageKind.Installer)]
+    [InlineData(true, true, true, "framework dependent", UpdatePackageKind.Installer)]
     [InlineData(false, true, true, "full only", UpdatePackageKind.Installer)]
     [InlineData(false, true, true, "legacy", UpdatePackageKind.PortableArchive)]
     public async Task DownloadsVerifiedPatchOrAutomaticallyFallsBackToFullPackage(
@@ -127,16 +128,19 @@ public sealed class GitHubUpdateServiceTests
     {
         const string patchName = "TileStart-Patch-win-x64.exe";
         const string manifestName = "TileStart-Update.txt";
+        const string frameworkDependentName = "TileStart-Setup-no-runtime-win-x64.exe";
         const string downloadRoot = "https://github.com/yequ172672/TileStart/releases/download/v0.2.0/";
-        var hasPatch = releaseType is "patch" or "corrupt patch";
+        var hasPatch = releaseType is "patch" or "corrupt patch" or "framework dependent";
         var release = GitHubUpdateService.ParseRelease(ReleaseJson) with
         {
             PatchInstaller = hasPatch ? new GitHubReleaseAsset(patchName, new Uri(downloadRoot + patchName)) : null,
             UpdateManifest = releaseType != "legacy" ? new GitHubReleaseAsset(manifestName, new Uri(downloadRoot + manifestName)) : null,
+            FrameworkDependentInstaller = new GitHubReleaseAsset(frameworkDependentName, new Uri(downloadRoot + frameworkDependentName)),
         };
         var assets = new Dictionary<string, string>
         {
             [release.Installer.Name] = "complete installer",
+            [frameworkDependentName] = "installer without bundled runtime",
             [release.PortableArchive.Name] = "portable archive",
             [patchName] = "small installer",
             [manifestName] = hasPatch
@@ -160,12 +164,23 @@ public sealed class GitHubUpdateServiceTests
                 File.WriteAllText(Path.Combine(directory.FullName, "unins000.exe"), string.Empty);
             }
 
+            if (releaseType == "framework dependent")
+            {
+                File.WriteAllText(Path.Combine(directory.FullName, "TileStart.Host.runtimeconfig.json"),
+                    """{"runtimeOptions":{"frameworks":[{"name":"Microsoft.WindowsDesktop.App","version":"8.0.0"}]}}""");
+            }
+
             var service = new GitHubUpdateService(client);
             var current = versionMatches ? new Version(0, 1, 9, 0) : new Version(0, 1, 8);
             var result = await service.DownloadAsync(release, current, Path.Combine(directory.FullName, "TileStart.Host.exe"));
             try
             {
                 Assert.Equal(expected, result.Kind);
+                if (expected == UpdatePackageKind.Installer)
+                {
+                    Assert.Equal(releaseType == "framework dependent" ? frameworkDependentName : release.Installer.Name,
+                        Path.GetFileName(result.Path));
+                }
                 Assert.Equal(Hash(assets[Path.GetFileName(result.Path)]), result.Sha256);
             }
             finally

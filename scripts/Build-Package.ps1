@@ -3,7 +3,8 @@ param(
     [switch]$SkipInstaller,
     [string]$Version,
     [string]$InformationalVersion,
-    [string]$ReleaseRepository
+    [string]$ReleaseRepository,
+    [switch]$IncludeFrameworkDependent
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,6 +12,7 @@ $repoRoot = Split-Path $PSScriptRoot -Parent
 $artifactsRoot = Join-Path $repoRoot 'artifacts'
 $packageRoot = Join-Path $artifactsRoot 'package'
 $publishDirectory = Join-Path $packageRoot 'TileStart'
+$frameworkDependentDirectory = Join-Path $packageRoot 'TileStart-FrameworkDependent'
 $portableArchive = Join-Path $packageRoot 'TileStart-portable-win-x64.zip'
 $checksumFile = Join-Path $packageRoot 'SHA256SUMS.txt'
 $nugetSource = 'https://api.nuget.org/v3/index.json'
@@ -69,26 +71,26 @@ if (Test-Path $packageRoot)
 {
     Remove-Item -LiteralPath $packageRoot -Recurse -Force
 }
-New-Item -ItemType Directory -Path $publishDirectory | Out-Null
+$nativeDirectory = Join-Path $artifactsRoot 'Release\x64'
 
-& dotnet publish $hostProject `
-    -c Release `
-    -r win-x64 `
-    --self-contained true `
-    --source $nugetSource `
-    -p:Version=$Version `
-    -p:AssemblyVersion=$assemblyVersion `
-    -p:FileVersion=$assemblyVersion `
-    -p:InformationalVersion=$InformationalVersion `
-    -o $publishDirectory
-if ($LASTEXITCODE -ne 0)
-{
-    throw "dotnet publish failed with exit code $LASTEXITCODE."
+function Publish-Host([string]$Directory, [string]$SelfContained) {
+    & dotnet publish $hostProject `
+        -c Release `
+        -r win-x64 `
+        --self-contained $SelfContained `
+        --source $nugetSource `
+        -p:Version=$Version `
+        -p:AssemblyVersion=$assemblyVersion `
+        -p:FileVersion=$assemblyVersion `
+        -p:InformationalVersion=$InformationalVersion `
+        -o $Directory
+    if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE." }
+
+    Copy-Item (Join-Path $nativeDirectory 'TileStart.Injector.exe') $Directory
+    Copy-Item (Join-Path $nativeDirectory 'TileStart.ShellHook.dll') $Directory
 }
 
-$nativeDirectory = Join-Path $artifactsRoot 'Release\x64'
-Copy-Item (Join-Path $nativeDirectory 'TileStart.Injector.exe') $publishDirectory
-Copy-Item (Join-Path $nativeDirectory 'TileStart.ShellHook.dll') $publishDirectory
+Publish-Host $publishDirectory 'true'
 
 Compress-Archive -Path (Join-Path $publishDirectory '*') -DestinationPath $portableArchive -CompressionLevel Optimal
 Write-Host "Portable package: $portableArchive"
@@ -117,7 +119,23 @@ if ($LASTEXITCODE -ne 0)
 }
 
 $installerPath = Join-Path $artifactsRoot 'installer\TileStart-Setup-win-x64.exe'
-Write-Checksums @($installerPath, $portableArchive)
+$packagePaths = @($installerPath, $portableArchive)
+if ($ReleaseRepository -or $IncludeFrameworkDependent) {
+    Publish-Host $frameworkDependentDirectory 'false'
+    $bundledRuntimeFiles = foreach ($file in (Get-ChildItem -LiteralPath $publishDirectory -Recurse -File)) {
+        $relative = [IO.Path]::GetRelativePath($publishDirectory, $file.FullName)
+        if (-not (Test-Path -LiteralPath (Join-Path $frameworkDependentDirectory $relative) -PathType Leaf)) {
+            $relative
+        }
+    }
+    [IO.File]::WriteAllLines((Join-Path $packageRoot 'TileStart-BundledRuntime.txt'), [string[]]$bundledRuntimeFiles,
+        [Text.UTF8Encoding]::new($false))
+    & $iscc "/DAppVersion=$Version" /DFrameworkDependent (Join-Path $repoRoot 'installer\TileStart.iss')
+    if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed to build the framework-dependent installer.' }
+    $packagePaths += Join-Path $artifactsRoot 'installer\TileStart-Setup-no-runtime-win-x64.exe'
+}
+
+Write-Checksums $packagePaths
 
 if ($ReleaseRepository) {
     & (Join-Path $PSScriptRoot 'Build-ReleaseUpdate.ps1') -Version $Version -Repository $ReleaseRepository -InnoSetupCompiler $iscc

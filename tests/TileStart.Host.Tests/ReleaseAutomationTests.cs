@@ -48,6 +48,7 @@ public sealed class ReleaseAutomationTests
         Assert.Contains("Delete incomplete draft", workflow);
         Assert.Contains("--cleanup-tag", workflow);
         Assert.Contains("git tag --list $tag", workflow);
+        Assert.Contains("release-assets/TileStart-Setup-no-runtime-win-x64.exe", workflow);
     }
 
     [Fact]

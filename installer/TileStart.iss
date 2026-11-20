@@ -26,7 +26,11 @@ OutputDir=..\artifacts\installer
 #ifdef PatchDirectory
 OutputBaseFilename=TileStart-Patch-win-x64
 #else
+#ifdef FrameworkDependent
+OutputBaseFilename=TileStart-Setup-no-runtime-win-x64
+#else
 OutputBaseFilename=TileStart-Setup-win-x64
+#endif
 #endif
 Compression=lzma2
 SolidCompression=yes
@@ -46,7 +50,12 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; Flags: unchecked
 Source: "{#PatchDirectory}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#PatchManifest}"; Flags: dontcopy
 #else
+#ifdef FrameworkDependent
+Source: "..\artifacts\package\TileStart-FrameworkDependent\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\artifacts\package\TileStart-BundledRuntime.txt"; Flags: dontcopy
+#else
 Source: "..\artifacts\package\TileStart\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
 #endif
 
 [UninstallDelete]
@@ -79,6 +88,13 @@ Filename: "{app}\{#AppExeName}"; Parameters: "--configure-nvidia-overlay"; Flags
 Filename: "{app}\{#AppExeName}"; Description: "启动 TileStart"; Flags: nowait postinstall skipifsilent; Check: not IsPortableUpdate
 
 [Code]
+#ifdef FrameworkDependent
+var
+  BundledRuntimeFiles: TArrayOfString;
+  RuntimeBackupDirectory: String;
+  RuntimeSwitchCommitted: Boolean;
+#endif
+
 function IsPortableUpdate: Boolean;
 begin
   Result := ExpandConstant('{param:TILESTARTUPDATE|}') = 'portable';
@@ -236,10 +252,118 @@ begin
 end;
 #endif
 
+#ifdef FrameworkDependent
+function HasNet8Framework(DotNetDirectory, Framework: String): Boolean;
+var
+  Directory: String;
+  FindRec: TFindRec;
+begin
+  Result := False;
+  Directory := AddBackslash(DotNetDirectory) + 'shared\' + Framework + '\';
+  if FindFirst(Directory + '8.0.*', FindRec) then
+  begin
+    try
+      repeat
+        if ((FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0) and
+          (StrToIntDef(Copy(FindRec.Name, 5, MaxInt), -1) >= 0) and
+          FileExists(Directory + FindRec.Name + '\' + Framework + '.deps.json') then
+        begin
+          Result := True;
+          exit;
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+function HasX64DesktopRuntime: Boolean;
+var
+  DotNetDirectory: String;
+begin
+  if not RegQueryStringValue(HKLM32, 'SOFTWARE\dotnet\Setup\InstalledVersions\x64', 'InstallLocation', DotNetDirectory) then
+  begin
+    DotNetDirectory := ExpandConstant('{pf64}\dotnet');
+    if ProcessorArchitecture = paArm64 then
+      DotNetDirectory := DotNetDirectory + '\x64';
+  end;
+  Result := FileExists(AddBackslash(DotNetDirectory) + 'dotnet.exe') and
+    HasNet8Framework(DotNetDirectory, 'Microsoft.NETCore.App') and
+    HasNet8Framework(DotNetDirectory, 'Microsoft.WindowsDesktop.App');
+end;
+
+function StageBundledRuntime: Boolean;
+var
+  AppDirectory, Backup, Source, Target: String;
+  I: Integer;
+begin
+  Result := True;
+  AppDirectory := AddBackslash(ExpandConstant('{app}'));
+  if not (FileExists(AppDirectory + 'hostfxr.dll') or FileExists(AppDirectory + 'coreclr.dll')) then
+    exit;
+
+  Result := False;
+  Backup := AppDirectory + '.tilestart-runtime-rollback';
+  if DirExists(Backup) then
+    exit;
+  ExtractTemporaryFile('TileStart-BundledRuntime.txt');
+  if not LoadStringsFromFile(ExpandConstant('{tmp}\TileStart-BundledRuntime.txt'), BundledRuntimeFiles) or
+    not CreateDir(Backup) then
+    exit;
+
+  RuntimeBackupDirectory := AddBackslash(Backup);
+  for I := 0 to GetArrayLength(BundledRuntimeFiles) - 1 do
+  begin
+    Source := AppDirectory + BundledRuntimeFiles[I];
+    if FileExists(Source) then
+    begin
+      Target := RuntimeBackupDirectory + BundledRuntimeFiles[I];
+      if not ForceDirectories(ExtractFileDir(Target)) or not RenameFile(Source, Target) then
+        exit;
+    end;
+  end;
+  Result := True;
+end;
+
+procedure DeinitializeSetup;
+var
+  AppDirectory, BackupFile: String;
+  I: Integer;
+  Restored: Boolean;
+begin
+  if RuntimeBackupDirectory = '' then
+    exit;
+  Restored := True;
+  if not RuntimeSwitchCommitted then
+  begin
+    AppDirectory := AddBackslash(ExpandConstant('{app}'));
+    for I := 0 to GetArrayLength(BundledRuntimeFiles) - 1 do
+    begin
+      BackupFile := RuntimeBackupDirectory + BundledRuntimeFiles[I];
+      if FileExists(BackupFile) and not RenameFile(BackupFile, AppDirectory + BundledRuntimeFiles[I]) then
+        Restored := False;
+    end;
+  end;
+  if Restored then
+    DelTree(RemoveBackslashUnlessRoot(RuntimeBackupDirectory), True, True, True)
+  else
+    Log('The previous runtime could not be fully restored. Backup retained: ' + RuntimeBackupDirectory);
+end;
+#endif
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   if not ValidateInstallDirectory(Result) then
     exit;
+
+#ifdef FrameworkDependent
+  if not HasX64DesktopRuntime then
+  begin
+    Result := '请先安装 Microsoft .NET 8 Desktop Runtime（x64），或使用自包含安装器。';
+    exit;
+  end;
+#endif
 
   if StopTileStart then
   begin
@@ -248,6 +372,10 @@ begin
     if not PatchBaselineMatches then
       Result := '热补丁与现有版本或文件不匹配。请重新检查更新以使用完整安装包。';
 #endif
+#ifdef FrameworkDependent
+    if not StageBundledRuntime then
+      Result := '无法安全移出现有的随包运行库。安装已中止。';
+#endif
   end
   else
     Result := '无法安全停止 TileStart。为避免影响 Windows 资源管理器，安装已中止。请重启 Windows 后重试。';
@@ -255,6 +383,10 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+#ifdef FrameworkDependent
+  if CurStep = ssPostInstall then
+    RuntimeSwitchCommitted := True;
+#endif
   if (CurStep = ssPostInstall) and not IsPortableUpdate then
     SaveStringToFile(ExpandConstant('{app}\.tilestart-installation'),
       'TileStart installation directory', False);

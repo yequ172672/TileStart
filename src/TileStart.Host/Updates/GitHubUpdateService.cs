@@ -43,7 +43,8 @@ public sealed record GitHubReleaseInfo(
     GitHubReleaseAsset PortableArchive,
     GitHubReleaseAsset Checksums,
     GitHubReleaseAsset? UpdateManifest,
-    GitHubReleaseAsset? PatchInstaller);
+    GitHubReleaseAsset? PatchInstaller,
+    GitHubReleaseAsset? FrameworkDependentInstaller = null);
 
 public sealed record DownloadedUpdate(UpdatePackageKind Kind, string Path, Version Version, string Sha256);
 
@@ -53,6 +54,7 @@ public sealed class GitHubUpdateService
     internal const string RepositoryUrl = "https://github.com/" + Repository;
     private const string LatestReleaseApi = "https://api.github.com/repos/" + Repository + "/releases/latest";
     private const string InstallerAssetName = "TileStart-Setup-win-x64.exe";
+    private const string FrameworkDependentAssetName = "TileStart-Setup-no-runtime-win-x64.exe";
     private const string PortableAssetName = "TileStart-portable-win-x64.zip";
     private const string ChecksumAssetName = "SHA256SUMS.txt";
     private const string UpdateManifestName = "TileStart-Update.txt";
@@ -91,6 +93,14 @@ public sealed class GitHubUpdateService
         progress?.Report(new UpdateProgressInfo(UpdateProgressStage.DownloadingChecksums));
         var checksumText = await DownloadTextAsync(release.Checksums.DownloadUri, MaximumChecksumBytes,
             cancellationToken);
+        if (IsFrameworkDependentCopy(executablePath))
+        {
+            var installer = release.FrameworkDependentInstaller
+                ?? throw new InvalidDataException("此版本没有提供依赖系统 .NET 的安装包。");
+            return await DownloadPackageAsync(release.Version, (UpdatePackageKind.Installer, installer),
+                checksumText, progress, cancellationToken);
+        }
+
         var manifest = await TryDownloadManifestAsync(release, checksumText, cancellationToken);
         var fullPackage = SelectPackage(release, IsInstalledCopy(executablePath) || manifest is not null);
         if (manifest is not null && release.PatchInstaller is { } patch && Path.GetDirectoryName(executablePath) is { } directory
@@ -176,6 +186,28 @@ public sealed class GitHubUpdateService
                                          || File.Exists(Path.Combine(directory, "unins000.exe")));
     }
 
+    internal static bool IsFrameworkDependentCopy(string? executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(Path.ChangeExtension(executablePath, ".runtimeconfig.json"));
+            using var config = JsonDocument.Parse(stream);
+            return config.RootElement.ValueKind == JsonValueKind.Object
+                   && config.RootElement.TryGetProperty("runtimeOptions", out var runtime)
+                   && runtime.ValueKind == JsonValueKind.Object
+                   && (runtime.TryGetProperty("framework", out _) || runtime.TryGetProperty("frameworks", out _));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return false;
+        }
+    }
+
     internal static bool IsNewer(Version current, Version available) =>
         NormalizeVersion(available) > NormalizeVersion(current);
 
@@ -215,7 +247,8 @@ public sealed class GitHubUpdateService
             RequireAsset(assets, PortableAssetName, downloadPath),
             RequireAsset(assets, ChecksumAssetName, downloadPath),
             FindAsset(assets, UpdateManifestName, downloadPath),
-            FindAsset(assets, PatchAssetName, downloadPath));
+            FindAsset(assets, PatchAssetName, downloadPath),
+            FindAsset(assets, FrameworkDependentAssetName, downloadPath));
     }
 
     internal static string ReadExpectedSha256(string manifest, string fileName)

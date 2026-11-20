@@ -144,7 +144,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          assets=(release-assets/TileStart-Setup-win-x64.exe release-assets/TileStart-portable-win-x64.zip
+          assets=(release-assets/TileStart-Setup-win-x64.exe release-assets/TileStart-Setup-no-runtime-win-x64.exe
+                  release-assets/TileStart-portable-win-x64.zip
                   release-assets/TileStart-Update.txt release-assets/SHA256SUMS.txt)
           if [[ -f release-assets/TileStart-Patch-win-x64.exe ]]; then
             assets+=(release-assets/TileStart-Patch-win-x64.exe)
