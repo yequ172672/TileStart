@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Controls.Primitives;
 using TileStart.Host.Applications;
 using TileStart.Host.Persistence;
 using TileStart.Host.Shell;
@@ -27,8 +28,6 @@ public partial class MainWindow : Window
     public MainWindow(AppThemeStyle themeStyle = AppThemeStyle.Windows11, bool useDarkMode = true)
     {
         InitializeComponent();
-        MinWidth = StartWindowSizing.WidthForColumns(StartWindowSizing.MinimumGroupColumns);
-        MaxWidth = StartWindowSizing.WidthForColumns(StartWindowSizing.MaximumGroupColumns);
         var savedSize = WindowSizeStore.Load();
         var savedLayout = TileLayoutStore.Load();
         var savedTileCount = savedLayout?.Groups.Sum(group => group.Tiles.Count) ?? 0;
@@ -37,13 +36,13 @@ public partial class MainWindow : Window
             .Select(group => group.WidthUnits)
             .DefaultIfEmpty(0)
             .Max() ?? 0;
-        var preferredWorkspaceColumns = StartWindowSizing.InitialWorkspaceColumns(
-            savedSize?.WorkspaceColumns,
-            savedTileCount,
-            widestSavedGroup);
-        var preferredHeight = savedSize?.Height ?? Height;
-        Width = StartWindowSizing.WidthForColumns(preferredWorkspaceColumns);
-        Height = Math.Max(MinHeight, preferredHeight);
+        var minimumWorkspaceColumns = StartWindowSizing.MinimumColumnsForTileLayout(savedTileCount, widestSavedGroup);
+        var appListWidth = savedSize?.AppListWidth ?? Win10VisualMetrics.AllAppsWidth;
+        MinWidth = StartWindowSizing.WidthForColumns(minimumWorkspaceColumns, appListWidth);
+        var preferredSize = savedSize ?? new WindowSizePreference(MinWidth, Height, appListWidth, false);
+        Width = Math.Max(MinWidth, preferredSize.Width);
+        Height = Math.Max(MinHeight, preferredSize.Height);
+        AppListColumn.Width = new GridLength(appListWidth);
         _appController = new Controllers.ApplicationPaneController(
             TileLayout,
             savedLayout,
@@ -124,20 +123,18 @@ public partial class MainWindow : Window
             this,
             WindowRoot,
             MainSurface,
+            AppListColumn,
             beforeShow: () =>
             {
                 _hasOpenContextMenu = false;
                 _ = _navigationController.RefreshWindowsUpdateStateAsync();
             },
             clearSearch: _navigationController.ClearSearch,
-            ensureTileScrollBarClearance: () => _tileDragCoordinator.EnsureTileScrollBarClearance(),
-            captureGroupReorderPositions: () => _tileDragCoordinator.CaptureGroupReorderPositions(),
-            animateGroupReorderFrom: p => _tileDragCoordinator.AnimateGroupReorderFrom(p),
             isAnyDragActive: () => _tileDragCoordinator.IsDragging,
             hasOpenContextMenu: () => _hasOpenContextMenu,
             cancelActiveDrag: () => { _tileDragCoordinator.CancelCurrentDrag(); },
-            preferredWorkspaceColumns,
-            preferredHeight,
+            preferredSize,
+            minimumWorkspaceColumns,
             themeStyle,
             useDarkMode);
         _controller.WindowDismissing += _tileWorkspaceController.CloseOpenContextMenu;
@@ -279,6 +276,22 @@ public partial class MainWindow : Window
     private void TopRightResizeBorder_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) =>
         _controller.TopRightResizeBorder_MouseLeftButtonDown(sender, e);
 
+    private void AppListSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (!e.Canceled)
+        {
+            _controller.SaveAppListWidth();
+        }
+    }
+
+    private void AppListSplitter_PreviewKeyUp(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key is Key.Left or Key.Right)
+        {
+            _controller.SaveAppListWidth();
+        }
+    }
+
     private void DismissWindow(bool yieldTopmost = false) => _controller.DismissWindow(yieldTopmost);
 
     private void PrepareMotionElements() => _controller.PrepareMotionElements();
@@ -288,6 +301,17 @@ public partial class MainWindow : Window
 
     protected override void OnPreviewKeyDown(System.Windows.Input.KeyEventArgs e)
     {
+        if (e.Key == Key.F11 && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            if (!e.IsRepeat)
+            {
+                _controller.ToggleFullScreen();
+            }
+
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Escape && _tileDragCoordinator?.CancelCurrentDrag() == true)
         {
             e.Handled = true;

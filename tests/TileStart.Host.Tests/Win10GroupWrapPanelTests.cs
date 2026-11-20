@@ -26,21 +26,15 @@ public sealed class Win10GroupWrapPanelTests
     }
 
     [Fact]
-    public void OverlayClearanceUsesTheMeasuredRuntimeWidths()
+    public void TileViewportReservesScrollBarSpaceWithoutGrowingTheWindow()
     {
-        Assert.Equal(
-            8.67,
-            Win10GroupWrapPanel.OverlayClearanceDeficit(
-                viewportWidth: 1275.33,
-                columns: 12,
-                scrollBarFootprint: 8),
-            precision: 2);
-        Assert.Equal(
-            0,
-            Win10GroupWrapPanel.OverlayClearanceDeficit(
-                viewportWidth: 1284,
-                columns: 12,
-                scrollBarFootprint: 8));
+        var viewport = StartWindowSizing.WidthForColumns(3)
+                       - StartWindowSizing.WidthForColumns(0)
+                       - Win10VisualMetrics.TileScrollViewerMargin.Left
+                       - Win10VisualMetrics.TileScrollViewerPadding.Right;
+
+        Assert.Equal(Win10VisualMetrics.TileScrollBarLayoutWidth, Win10VisualMetrics.TileScrollViewerPadding.Right);
+        Assert.Equal(12, Win10GroupWrapPanel.ColumnsForWidth(viewport));
     }
 
     [Fact]

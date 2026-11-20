@@ -3,11 +3,12 @@ using System.Text.Json;
 
 namespace TileStart.Host.Windowing;
 
-public readonly record struct WindowSizePreference(int WorkspaceColumns, double Height);
+public readonly record struct WindowSizePreference(double Width, double Height, double AppListWidth, bool IsFullScreen);
 
 public static class WindowSizeStore
 {
-    internal const int CurrentFormatVersion = 2;
+    internal const int CurrentFormatVersion = 3;
+    private const int ColumnFormatVersion = 2;
 
     private static readonly string DirectoryPath =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TileStart");
@@ -23,21 +24,7 @@ public static class WindowSizeStore
                 return null;
             }
 
-            var size = JsonSerializer.Deserialize<SavedSize>(File.ReadAllText(FilePath));
-            if (size is null
-                || !double.IsFinite(size.Height)
-                || size.Height <= 0
-                || size.Version < CurrentFormatVersion && (!double.IsFinite(size.Width) || size.Width <= 0))
-            {
-                return null;
-            }
-
-            var columns = size.Version >= CurrentFormatVersion
-                ? size.WorkspaceColumns
-                : StartWindowSizing.ColumnsForWidth(MigrateWidth(size.Width, size.Version));
-            return columns is < StartWindowSizing.MinimumGroupColumns or > StartWindowSizing.MaximumGroupColumns
-                ? null
-                : new WindowSizePreference(columns, size.Height);
+            return Deserialize(File.ReadAllText(FilePath));
         }
         catch (IOException)
         {
@@ -53,11 +40,51 @@ public static class WindowSizeStore
         }
     }
 
-    public static void Save(int workspaceColumns, double height)
+    internal static WindowSizePreference? Deserialize(string json)
     {
-        if (workspaceColumns is < StartWindowSizing.MinimumGroupColumns or > StartWindowSizing.MaximumGroupColumns
-            || !double.IsFinite(height)
-            || height <= 0)
+        var size = JsonSerializer.Deserialize<SavedSize>(json);
+        if (size is null || !double.IsFinite(size.Height) || size.Height <= 0)
+        {
+            return null;
+        }
+
+        if (size.Version >= CurrentFormatVersion)
+        {
+            return double.IsFinite(size.Width) && size.Width > 0
+                ? new WindowSizePreference(size.Width, size.Height,
+                    StartWindowSizing.ClampAppListWidth(size.AppListWidth, StartWindowSizing.MaximumAppListWidth),
+                    size.IsFullScreen)
+                : null;
+        }
+
+        if (size.Version < ColumnFormatVersion && (!double.IsFinite(size.Width) || size.Width <= 0))
+        {
+            return null;
+        }
+
+        var columns = size.Version == ColumnFormatVersion
+            ? size.WorkspaceColumns
+            : StartWindowSizing.LegacyColumnsForWidth(MigrateWidth(size.Width, size.Version));
+        return columns is < StartWindowSizing.MinimumGroupColumns or > StartWindowSizing.LegacyMaximumGroupColumns
+            ? null
+            : new WindowSizePreference(StartWindowSizing.WidthForColumns(columns), size.Height,
+                Win10VisualMetrics.AllAppsWidth, false);
+    }
+
+    internal static string Serialize(WindowSizePreference size) => JsonSerializer.Serialize(new SavedSize
+    {
+        Width = size.Width,
+        Height = size.Height,
+        AppListWidth = size.AppListWidth,
+        IsFullScreen = size.IsFullScreen,
+        // Older builds still read the nearest column count and height when rolling back.
+        WorkspaceColumns = StartWindowSizing.LegacyColumnsForWidth(size.Width),
+        Version = CurrentFormatVersion,
+    });
+
+    public static void Save(WindowSizePreference size)
+    {
+        if (!double.IsFinite(size.Width) || size.Width <= 0 || !double.IsFinite(size.Height) || size.Height <= 0)
         {
             return;
         }
@@ -65,12 +92,9 @@ public static class WindowSizeStore
         try
         {
             Directory.CreateDirectory(DirectoryPath);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(new SavedSize
-            {
-                WorkspaceColumns = workspaceColumns,
-                Height = height,
-                Version = CurrentFormatVersion,
-            }));
+            var temporary = FilePath + ".tmp";
+            File.WriteAllText(temporary, Serialize(size));
+            File.Move(temporary, FilePath, true);
         }
         catch (IOException)
         {
@@ -89,6 +113,8 @@ public static class WindowSizeStore
     {
         public double Width { get; init; }
         public double Height { get; init; }
+        public double AppListWidth { get; init; }
+        public bool IsFullScreen { get; init; }
         public int WorkspaceColumns { get; init; }
         public int Version { get; init; }
     }

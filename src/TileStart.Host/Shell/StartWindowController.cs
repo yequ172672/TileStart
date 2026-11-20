@@ -7,7 +7,6 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Controls;
-using TileStart.Host.Tiles.Models;
 using TileStart.Host.Themes;
 using TileStart.Host.Utilities;
 using TileStart.Host.Windowing;
@@ -46,11 +45,9 @@ public class StartWindowController : IDisposable
     private readonly Window _window;
     private readonly Grid _windowRoot;
     private readonly Grid _mainSurface;
+    private readonly ColumnDefinition _appListColumn;
     private readonly Action _beforeShow;
     private readonly Action _clearSearch;
-    private readonly Func<bool> _ensureTileScrollBarClearance;
-    private readonly Func<IReadOnlyDictionary<TileGroup, System.Windows.Point>> _captureGroupReorderPositions;
-    private readonly Action<IReadOnlyDictionary<TileGroup, System.Windows.Point>> _animateGroupReorderFrom;
     private readonly Func<bool> _isAnyDragActive;
     private readonly Func<bool> _hasOpenContextMenu;
     private readonly Action _cancelActiveDrag;
@@ -79,11 +76,15 @@ public class StartWindowController : IDisposable
     private bool _isLiveResizeActive;
     private bool _restoreMaterialAfterLiveResize;
     private nint _pendingDisplayMonitor;
-    private double _requestedMinimumWidth = StartWindowSizing.WidthForColumns(0);
     private readonly double _requestedMinimumHeight;
     private readonly bool _useDarkMode;
-    private int _preferredWorkspaceColumns;
+    private int _minimumWorkspaceColumns;
+    private double _preferredWidth;
     private double _preferredHeight;
+    private double _preferredAppListWidth;
+    private double _resizeAreaWidth;
+    private double _resizeAreaHeight;
+    private bool _isFullScreen;
 
     public event Action? WindowDismissing;
     public event Action? WindowShown;
@@ -95,38 +96,32 @@ public class StartWindowController : IDisposable
         Window window,
         Grid windowRoot,
         Grid mainSurface,
+        ColumnDefinition appListColumn,
         Action beforeShow,
         Action clearSearch,
-        Func<bool> ensureTileScrollBarClearance,
-        Func<IReadOnlyDictionary<TileGroup, System.Windows.Point>> captureGroupReorderPositions,
-        Action<IReadOnlyDictionary<TileGroup, System.Windows.Point>> animateGroupReorderFrom,
         Func<bool> isAnyDragActive,
         Func<bool> hasOpenContextMenu,
         Action cancelActiveDrag,
-        int preferredWorkspaceColumns,
-        double preferredHeight,
+        WindowSizePreference preferredSize,
+        int minimumWorkspaceColumns,
         AppThemeStyle themeStyle = AppThemeStyle.Windows11,
         bool useDarkMode = true)
     {
         _window = window;
         _windowRoot = windowRoot;
         _mainSurface = mainSurface;
+        _appListColumn = appListColumn;
         _beforeShow = beforeShow;
         _clearSearch = clearSearch;
-        _ensureTileScrollBarClearance = ensureTileScrollBarClearance;
-        _captureGroupReorderPositions = captureGroupReorderPositions;
-        _animateGroupReorderFrom = animateGroupReorderFrom;
         _isAnyDragActive = isAnyDragActive;
         _hasOpenContextMenu = hasOpenContextMenu;
         _cancelActiveDrag = cancelActiveDrag;
         _requestedMinimumHeight = window.MinHeight;
-        _preferredWorkspaceColumns = Math.Clamp(
-            preferredWorkspaceColumns,
-            StartWindowSizing.MinimumGroupColumns,
-            StartWindowSizing.MaximumGroupColumns);
-        _preferredHeight = double.IsFinite(preferredHeight) && preferredHeight > 0
-            ? preferredHeight
-            : window.Height;
+        _preferredWidth = preferredSize.Width;
+        _preferredHeight = preferredSize.Height;
+        _preferredAppListWidth = preferredSize.AppListWidth;
+        _isFullScreen = preferredSize.IsFullScreen;
+        _minimumWorkspaceColumns = minimumWorkspaceColumns;
         _themeStyle = themeStyle;
         _useDarkMode = useDarkMode;
 
@@ -136,16 +131,34 @@ public class StartWindowController : IDisposable
 
     public void SetMinimumWorkspaceColumns(int columns)
     {
-        _requestedMinimumWidth = StartWindowSizing.WidthForColumns(columns);
-        _window.MinWidth = Math.Min(_requestedMinimumWidth, _window.MaxWidth);
-        var currentWidth = _window.ActualWidth > 0 ? _window.ActualWidth : _window.Width;
-        if (currentWidth + 0.5 >= _window.MinWidth)
+        if (_minimumWorkspaceColumns == columns)
         {
             return;
         }
 
-        _window.Width = _window.MinWidth;
+        _minimumWorkspaceColumns = columns;
         PositionOnCurrentMonitor();
+    }
+
+    public void SaveAppListWidth()
+    {
+        if (_isDisplayChangePending)
+        {
+            return;
+        }
+
+        _preferredAppListWidth = StartWindowSizing.ClampAppListWidth(
+            _appListColumn.Width.Value, StartWindowSizing.MaximumAppListWidth);
+        _window.MinWidth = Math.Min(_window.MaxWidth,
+            StartWindowSizing.WidthForColumns(_minimumWorkspaceColumns, _appListColumn.Width.Value));
+        PersistPreferredSize();
+    }
+
+    public void ToggleFullScreen()
+    {
+        _isFullScreen = !_isFullScreen;
+        PositionOnCurrentMonitor();
+        PersistPreferredSize();
     }
 
     public void SetWindowSource(HwndSource? source)
@@ -218,15 +231,6 @@ public class StartWindowController : IDisposable
             _taskbarEdge == TaskbarEdge.Bottom,
             animationsEnabled);
         _window.Show();
-        _ = _window.Dispatcher.BeginInvoke(
-            System.Windows.Threading.DispatcherPriority.Loaded,
-            () =>
-            {
-                if (_ensureTileScrollBarClearance())
-                {
-                    PositionOnCurrentMonitor();
-                }
-            });
         _window.Activate();
         _window.Focus();
         var activationGeneration = ++_foregroundActivationGeneration;
@@ -310,7 +314,7 @@ public class StartWindowController : IDisposable
 
     private void ApplyWindowCornerPreference()
     {
-        var preference = _themeStyle == AppThemeStyle.Windows11
+        var preference = _themeStyle == AppThemeStyle.Windows11 && !_isFullScreen
             ? DwmWindowCornerRound
             : DwmWindowCornerDoNotRound;
         _ = DwmSetWindowAttribute(
@@ -346,14 +350,7 @@ public class StartWindowController : IDisposable
         e.Handled = true;
         Mouse.Capture(null);
         SendMessage(new WindowInteropHelper(_window).Handle, WmNcLButtonDown, hitTest, 0);
-        if (hitTest is HtRight or HtTopRight)
-        {
-            SnapWindowWidthAfterResize();
-        }
-        else
-        {
-            CapturePreferredSize();
-        }
+        CommitWindowResize(hitTest);
     }
 
     private void TryAcquireForeground(int generation, int attempt)
@@ -459,22 +456,28 @@ public class StartWindowController : IDisposable
         var edge = StartWindowPlacement.InferTaskbarEdge(monitorRect, taskbarRect);
         _taskbarEdge = edge;
         var scale = 96.0 / dpi;
-        var logicalWorkWidth = workArea.Width * scale;
-        var logicalWorkHeight = workArea.Height * scale;
-        _window.MinWidth = Math.Min(_requestedMinimumWidth, logicalWorkWidth);
-        _window.MinHeight = Math.Min(_requestedMinimumHeight, logicalWorkHeight);
-        _window.MaxWidth = StartWindowSizing.MaximumWidth(logicalWorkWidth);
-        _window.MaxHeight = Math.Max(1, logicalWorkHeight);
-        var requestedWidth = StartWindowSizing.WidthForColumns(_preferredWorkspaceColumns);
-        var logicalWidth = Math.Max(
-            _window.MinWidth,
-            StartWindowSizing.SnapWidth(requestedWidth, logicalWorkWidth));
-        var logicalHeight = StartWindowSizing.ClampHeight(
-            _preferredHeight,
-            _window.MinHeight,
-            logicalWorkHeight);
+        var bounds = _isFullScreen ? monitorRect : workArea;
+        _resizeAreaWidth = Math.Max(1, bounds.Width * scale);
+        _resizeAreaHeight = Math.Max(1, bounds.Height * scale);
+        _window.MaxWidth = _resizeAreaWidth;
+        _window.MaxHeight = _resizeAreaHeight;
+        _window.MinHeight = Math.Min(_requestedMinimumHeight, _resizeAreaHeight);
+
+        var listWidthOnMonitor = StartWindowSizing.ClampAppListWidth(_preferredAppListWidth,
+            StartWindowSizing.AppListWidthLimit(_resizeAreaWidth, _minimumWorkspaceColumns));
+        var minimumWidth = StartWindowSizing.WidthForColumns(_minimumWorkspaceColumns, listWidthOnMonitor);
+        var logicalWidth = _isFullScreen ? _resizeAreaWidth
+            : StartWindowSizing.ClampWidth(_preferredWidth, minimumWidth, _resizeAreaWidth);
+        var logicalHeight = _isFullScreen ? _resizeAreaHeight
+            : StartWindowSizing.ClampHeight(_preferredHeight, _window.MinHeight, _resizeAreaHeight);
+        var listWidthLimit = StartWindowSizing.AppListWidthLimit(logicalWidth, _minimumWorkspaceColumns);
+        _appListColumn.MinWidth = Math.Min(StartWindowSizing.MinimumAppListWidth, listWidthLimit);
+        _appListColumn.MaxWidth = listWidthLimit;
+        _appListColumn.Width = new GridLength(StartWindowSizing.ClampAppListWidth(_preferredAppListWidth, listWidthLimit));
+        _window.MinWidth = Math.Min(minimumWidth, _resizeAreaWidth);
+
         var placement = StartWindowPlacement.Calculate(
-            workArea,
+            bounds,
             edge,
             (int)Math.Round(logicalWidth * dpi / 96.0),
             (int)Math.Round(logicalHeight * dpi / 96.0));
@@ -491,12 +494,13 @@ public class StartWindowController : IDisposable
             return;
         }
 
+        ApplyWindowCornerPreference();
         var positioned = SetWindowPos(handle, HwndTopmost, placement.Left, placement.Top, placement.Width,
             placement.Height, SwpNoActivate | SwpFrameChanged);
         DiagnosticLog.Write(
             $"Window placement: monitor={monitorRect}, work={ToPixelRect(monitorInfo.WorkArea)}, dpi={dpi}, " +
-            $"logicalWork={logicalWorkWidth:F1}x{logicalWorkHeight:F1}, min={_window.MinWidth:F1}, " +
-            $"max={_window.MaxWidth:F1}, preferredColumns={_preferredWorkspaceColumns}, taskbar={taskbarRect}, " +
+            $"max={_resizeAreaWidth:F1}x{_resizeAreaHeight:F1}, appList={_appListColumn.Width.Value:F1}, " +
+            $"fullScreen={_isFullScreen}, taskbar={taskbarRect}, " +
             $"edge={edge}, target={placement}, positioned={positioned}, " +
             $"error={(positioned ? 0 : Marshal.GetLastWin32Error())}.");
     }
@@ -554,23 +558,8 @@ public class StartWindowController : IDisposable
         }
     }
 
-    private void CapturePreferredSize()
-    {
-        if (_isDisplayChangePending)
-        {
-            return;
-        }
-
-        if (_window.ActualWidth > 0 && _window.ActualHeight > 0)
-        {
-            _preferredWorkspaceColumns = StartWindowSizing.ColumnsForWidth(_window.ActualWidth, _window.MaxWidth);
-            _preferredHeight = _window.ActualHeight;
-            PersistPreferredSize();
-        }
-    }
-
     private void PersistPreferredSize() =>
-        WindowSizeStore.Save(_preferredWorkspaceColumns, _preferredHeight);
+        WindowSizeStore.Save(new WindowSizePreference(_preferredWidth, _preferredHeight, _preferredAppListWidth, _isFullScreen));
 
     public void DismissWindow(bool yieldTopmost = false)
     {
@@ -755,33 +744,31 @@ public class StartWindowController : IDisposable
         || Mouse.RightButton == MouseButtonState.Pressed
         || Mouse.MiddleButton == MouseButtonState.Pressed;
 
-    private void SnapWindowWidthAfterResize()
+    private void CommitWindowResize(int hitTest)
     {
-        var currentWidth = _window.ActualWidth > 0 ? _window.ActualWidth : _window.Width;
-        var currentHeight = _window.ActualHeight > 0 ? _window.ActualHeight : _window.Height;
-        var targetWidth = StartWindowSizing.SnapWidth(currentWidth, _window.MaxWidth);
-        var calculatedColumns = StartWindowSizing.ColumnsForWidth(targetWidth, _window.MaxWidth);
-        var previousGroupPositions = _captureGroupReorderPositions();
-        // Changing Width on every render frame forces the complete tile workspace through
-        // repeated WPF measure/arrange passes. That looks acceptable on a fast GPU but
-        // becomes delayed under software rendering, remote sessions, and slower machines.
-        // Snap the native window once; only the lightweight group transforms animate.
-        // Placement uses the preferred size. Preserve both dimensions before it can restore
-        // the old width or undo the vertical part of a corner resize.
-        _preferredWorkspaceColumns = calculatedColumns;
-        if (!_isDisplayChangePending && double.IsFinite(currentHeight) && currentHeight > 0)
+        if (_isDisplayChangePending)
         {
-            _preferredHeight = currentHeight;
+            return;
         }
 
-        _window.Width = targetWidth;
+        var currentWidth = _window.ActualWidth > 0 ? _window.ActualWidth : _window.Width;
+        var currentHeight = _window.ActualHeight > 0 ? _window.ActualHeight : _window.Height;
+        var fillsArea = StartWindowSizing.FillsArea(currentWidth, currentHeight, _resizeAreaWidth, _resizeAreaHeight);
+        if (!fillsArea)
+        {
+            if (_isFullScreen || hitTest is HtRight or HtTopRight)
+            {
+                _preferredWidth = currentWidth;
+            }
+            if (_isFullScreen || hitTest is HtTop or HtTopRight)
+            {
+                _preferredHeight = currentHeight;
+            }
+        }
+
+        _isFullScreen = fillsArea;
         PositionOnCurrentMonitor();
-        _window.UpdateLayout();
-        _animateGroupReorderFrom(previousGroupPositions);
-        DiagnosticLog.Write(
-            $"Window resize snap: current={currentWidth:F1}, target={targetWidth:F1}, max={_window.MaxWidth:F1}, " +
-            $"calculatedColumns={calculatedColumns}, preferredColumns={_preferredWorkspaceColumns}.");
-        CapturePreferredSize();
+        PersistPreferredSize();
     }
 
     private void BeginLiveResize()

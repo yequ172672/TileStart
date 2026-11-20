@@ -1,29 +1,11 @@
+using System.IO;
+using System.Xml.Linq;
 using TileStart.Host;
 
 namespace TileStart.Host.Tests;
 
 public sealed class StartWindowSizingTests
 {
-    [Fact]
-    public void CleanInstallStartsWithTheTileWorkspaceCollapsed()
-    {
-        Assert.Equal(0, StartWindowSizing.DefaultWorkspaceColumns);
-        Assert.Equal(StartWindowSizing.MinimumGroupColumns, StartWindowSizing.DefaultWorkspaceColumns);
-    }
-
-    [Fact]
-    public void EmptyLayoutIgnoresAPreviouslySavedExpandedWorkspace()
-    {
-        Assert.Equal(0, StartWindowSizing.InitialWorkspaceColumns(3, 0, 0));
-    }
-
-    [Fact]
-    public void ExistingTilesRestoreTheSavedWorkspaceWithoutViolatingTheirMinimumWidth()
-    {
-        Assert.Equal(3, StartWindowSizing.InitialWorkspaceColumns(3, 1, 4));
-        Assert.Equal(2, StartWindowSizing.InitialWorkspaceColumns(1, 1, 5));
-    }
-
     [Fact]
     public void AllAppsOnlyWidthDoesNotReserveTheTilePaneInset()
     {
@@ -56,59 +38,49 @@ public sealed class StartWindowSizingTests
     }
 
     [Theory]
-    [InlineData(800, 1)]
-    [InlineData(1100, 2)]
-    [InlineData(1500, 3)]
-    public void WidthSnapsToNearestAvailableColumnTarget(double requestedWidth, int expectedColumns)
+    [InlineData(1801, 2560, 1801)]
+    [InlineData(2560, 2560, 2560)]
+    [InlineData(4000, 2560, 2560)]
+    [InlineData(1700, 1920 / 1.75, 1920 / 1.75)]
+    [InlineData(400, 2560, 770)]
+    [InlineData(1700, 640, 640)]
+    public void DraggedWidthUsesTheMonitorAndDoesNotSnapToColumns(double requested, double available, double expected)
     {
-        Assert.Equal(
-            StartWindowSizing.WidthForColumns(expectedColumns),
-            StartWindowSizing.SnapWidth(requestedWidth, double.PositiveInfinity));
+        Assert.Equal(expected, StartWindowSizing.ClampWidth(requested, 770, available));
     }
 
     [Fact]
-    public void WidthCanSnapToTheAllAppsOnlyLayout()
+    public void ListWidthLeavesRoomForTheMinimumTileWorkspace()
     {
-        Assert.Equal(
-            StartWindowSizing.WidthForColumns(0),
-            StartWindowSizing.SnapWidth(400, double.PositiveInfinity));
+        var widthWithList = StartWindowSizing.WidthForColumns(1, 360);
+
+        Assert.Equal(100, widthWithList - StartWindowSizing.WidthForColumns(1));
+        Assert.Equal(360, StartWindowSizing.AppListWidthLimit(widthWithList, 1));
+        Assert.Equal(360, StartWindowSizing.ClampAppListWidth(480, 360));
+        Assert.Equal(StartWindowSizing.MaximumAppListWidth, StartWindowSizing.AppListWidthLimit(2560, 1));
     }
 
     [Fact]
-    public void WorkAreaExcludesTargetsThatCannotFit()
+    public void TileGroupsStretchFromTheResizableApplicationList()
     {
-        var twoColumns = StartWindowSizing.WidthForColumns(2);
-        var availableWidth = twoColumns + 20;
+        var root = XDocument.Load(Path.Combine(AppContext.BaseDirectory, "TestData", "Xaml", "MainWindow.xaml"));
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var names = root.Descendants().Where(element => element.Attribute(xaml + "Name") is not null);
+        var groups = Assert.Single(names, element => (string?)element.Attribute(xaml + "Name") == "TileGroupsControl");
+        var splitter = Assert.Single(names, element => (string?)element.Attribute(xaml + "Name") == "AppListSplitter");
 
-        Assert.Equal(twoColumns, StartWindowSizing.SnapWidth(10_000, availableWidth));
-        Assert.Equal(twoColumns, StartWindowSizing.MaximumWidth(availableWidth));
+        Assert.Equal("Stretch", (string?)groups.Attribute("HorizontalAlignment"));
+        Assert.Equal("CurrentAndNext", (string?)splitter.Attribute("ResizeBehavior"));
+        Assert.Equal("1", (string?)splitter.Attribute("Grid.Column"));
     }
 
-    [Fact]
-    public void WorkAreaNarrowerThanTheFixedPaneUsesTheActualAvailableWidth()
+    [Theory]
+    [InlineData(2555, 1387, true)]
+    [InlineData(1800, 1392, false)]
+    [InlineData(2560, 1200, false)]
+    public void DragFillsTheScreenOnlyWhenBothEdgesReachTheWorkArea(double width, double height, bool expected)
     {
-        var availableWidth = StartWindowSizing.WidthForColumns(0) - 40;
-
-        Assert.Equal(availableWidth, StartWindowSizing.SnapWidth(10_000, availableWidth));
-        Assert.Equal(availableWidth, StartWindowSizing.MaximumWidth(availableWidth));
-    }
-
-    [Fact]
-    public void FullHdAt150PercentCanExposeTwoWorkspaceColumns()
-    {
-        var logicalWorkWidth = 1920 / 1.5;
-        var maximumWidth = StartWindowSizing.MaximumWidth(logicalWorkWidth);
-
-        Assert.Equal(2, StartWindowSizing.ColumnsForWidth(maximumWidth, logicalWorkWidth));
-    }
-
-    [Fact]
-    public void FullHdAt175PercentCanOnlyExposeOneWorkspaceColumn()
-    {
-        var logicalWorkWidth = 1920 / 1.75;
-        var maximumWidth = StartWindowSizing.MaximumWidth(logicalWorkWidth);
-
-        Assert.Equal(1, StartWindowSizing.ColumnsForWidth(maximumWidth, logicalWorkWidth));
+        Assert.Equal(expected, StartWindowSizing.FillsArea(width, height, 2560, 1392));
     }
 
     [Theory]
@@ -149,12 +121,4 @@ public sealed class StartWindowSizingTests
             StartWindowSizing.MinimumColumnsForTileLayout(tileCount, widestGroupWidthUnits));
     }
 
-    [Fact]
-    public void InvalidWidthFallsBackToTheMinimumWorkspace()
-    {
-        Assert.Equal(StartWindowSizing.MinimumGroupColumns, StartWindowSizing.ColumnsForWidth(double.NaN));
-        Assert.Equal(
-            StartWindowSizing.MinimumGroupColumns,
-            StartWindowSizing.ColumnsForWidth(double.PositiveInfinity));
-    }
 }

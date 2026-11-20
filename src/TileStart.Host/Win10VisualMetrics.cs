@@ -73,7 +73,7 @@ public static class Win10VisualMetrics
     public const double TileScrollBarThumbRestInset = 2;
     public const double TileScrollBarRightMargin = 0;
     public const double TileScrollBarLayoutWidth = TileScrollBarWidth + TileScrollBarRightMargin;
-    public const double TileScrollViewerLeftMargin = 28;
+    public const double TileScrollViewerLeftMargin = 12;
 
     public static GridLength CollapsedNavigationGridLength { get; } = new(CollapsedNavigationWidth);
 
@@ -174,4 +174,5 @@ public static class Win10VisualMetrics
     public static Thickness TileScrollBarThumbRestMargin { get; } = new(0, 0, TileScrollBarThumbRestInset, 0);
 
     public static Thickness TileScrollViewerMargin { get; } = new(TileScrollViewerLeftMargin, 28, 0, 0);
+    public static Thickness TileScrollViewerPadding { get; } = new(0, 0, TileScrollBarLayoutWidth, 0);
 }

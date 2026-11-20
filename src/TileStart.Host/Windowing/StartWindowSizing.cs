@@ -7,29 +7,12 @@ public static class StartWindowSizing
     // Win10 permits the tile pane to be completely collapsed, leaving only
     // the navigation rail and the all-apps list visible.
     public const int MinimumGroupColumns = 0;
-    public const int MaximumGroupColumns = 3;
-    public const int DefaultWorkspaceColumns = MinimumGroupColumns;
+    internal const int LegacyMaximumGroupColumns = 3;
+    internal const double MinimumAppListWidth = 180;
+    internal const double MaximumAppListWidth = 560;
+    private const double FullScreenDragTolerance = 8;
 
     public static int MinimumColumnsForTileCount(int tileCount) => tileCount > 0 ? 1 : 0;
-
-    public static int InitialWorkspaceColumns(
-        int? savedWorkspaceColumns,
-        int tileCount,
-        int widestGroupWidthUnits)
-    {
-        var minimumColumns = MinimumColumnsForTileLayout(tileCount, widestGroupWidthUnits);
-        if (minimumColumns == 0)
-        {
-            // window.json can survive an uninstall or an earlier build while layout.json is
-            // empty. Restoring that stale width would reopen a blank tile workspace.
-            return MinimumGroupColumns;
-        }
-
-        return Math.Clamp(
-            Math.Max(savedWorkspaceColumns ?? DefaultWorkspaceColumns, minimumColumns),
-            minimumColumns,
-            MaximumGroupColumns);
-    }
 
     public static int MinimumColumnsForTileLayout(int tileCount, int widestGroupWidthUnits)
     {
@@ -41,88 +24,53 @@ public static class StartWindowSizing
         var workspaceColumns = (Math.Max(1, widestGroupWidthUnits)
                                    + TileWorkspaceMetrics.LegacyGroupWidthUnits - 1)
                                / TileWorkspaceMetrics.LegacyGroupWidthUnits;
-        return Math.Clamp(workspaceColumns, 1, MaximumGroupColumns);
+        return workspaceColumns;
     }
 
-    private static double AllAppsOnlyWidth =>
-        Win10VisualMetrics.CollapsedNavigationWidth
-        + Win10VisualMetrics.AllAppsWidth;
-
-    public static double WidthForColumns(int columns)
+    public static double WidthForColumns(int columns, double appListWidth = Win10VisualMetrics.AllAppsWidth)
     {
-        columns = Math.Clamp(columns, MinimumGroupColumns, MaximumGroupColumns);
-        if (columns == 0)
-        {
-            // The tile viewer's left inset belongs to the tile pane. Keeping it in the
-            // all-apps-only width leaves a visible empty strip after the list scrollbar.
-            return AllAppsOnlyWidth;
-        }
-
-        return AllAppsOnlyWidth
-               + Win10VisualMetrics.TileScrollViewerLeftMargin
-               + Win10GroupWrapPanel.RequiredWidth(
-                   columns * TileWorkspaceMetrics.LegacyGroupWidthUnits)
-               + Win10VisualMetrics.TileScrollBarLayoutWidth;
+        return Win10VisualMetrics.CollapsedNavigationWidth + appListWidth + TileWorkspaceWidth(columns);
     }
 
-    public static double SnapWidth(double requestedWidth, double availableWidth)
-    {
-        if (!double.IsFinite(requestedWidth))
-        {
-            requestedWidth = WidthForColumns(MinimumGroupColumns);
-        }
+    private static double TileWorkspaceWidth(int columns) => columns <= 0
+        ? 0
+        : Win10VisualMetrics.TileScrollViewerLeftMargin
+          + Win10GroupWrapPanel.RequiredWidth(columns * TileWorkspaceMetrics.LegacyGroupWidthUnits)
+          + Win10VisualMetrics.TileScrollBarLayoutWidth;
 
-        var candidates = AvailableColumns(availableWidth);
-        if (candidates.Length == 0)
-        {
-            return Math.Max(1, availableWidth);
-        }
-
-        return WidthForColumns(NearestColumns(requestedWidth, candidates));
-    }
-
-    public static int ColumnsForWidth(double requestedWidth, double availableWidth = double.PositiveInfinity)
-    {
-        if (!double.IsFinite(requestedWidth))
-        {
-            return MinimumGroupColumns;
-        }
-
-        var candidates = AvailableColumns(availableWidth);
-        if (candidates.Length == 0)
-        {
-            return MinimumGroupColumns;
-        }
-
-        return NearestColumns(requestedWidth, candidates);
-    }
-
-    private static int[] AvailableColumns(double availableWidth) =>
-        Enumerable.Range(
-                MinimumGroupColumns,
-                MaximumGroupColumns - MinimumGroupColumns + 1)
-            .Where(columns => !double.IsFinite(availableWidth) || WidthForColumns(columns) <= availableWidth + 0.1)
-            .ToArray();
-
-    private static int NearestColumns(double requestedWidth, IEnumerable<int> candidates) =>
-        candidates
-            .OrderBy(columns => Math.Abs(WidthForColumns(columns) - requestedWidth))
-            .ThenBy(columns => columns)
+    internal static int LegacyColumnsForWidth(double width) =>
+        Enumerable.Range(MinimumGroupColumns, LegacyMaximumGroupColumns + 1)
+            .OrderBy(columns => Math.Abs(WidthForColumns(columns) - width))
             .First();
 
-    public static double MaximumWidth(double availableWidth)
-    {
-        return SnapWidth(WidthForColumns(MaximumGroupColumns), availableWidth);
-    }
+    internal static double AppListWidthLimit(double windowWidth, int minimumColumns) =>
+        Math.Clamp(windowWidth - Win10VisualMetrics.CollapsedNavigationWidth - TileWorkspaceWidth(minimumColumns),
+            Math.Min(MinimumAppListWidth, Math.Max(0, windowWidth - Win10VisualMetrics.CollapsedNavigationWidth)),
+            MaximumAppListWidth);
 
-    public static double ClampHeight(double requestedHeight, double minimumHeight, double availableHeight)
+    internal static double ClampAppListWidth(double requestedWidth, double limit) =>
+        Math.Clamp(double.IsFinite(requestedWidth) && requestedWidth > 0 ? requestedWidth : Win10VisualMetrics.AllAppsWidth,
+            Math.Min(MinimumAppListWidth, limit), limit);
+
+    internal static bool FillsArea(double width, double height, double areaWidth, double areaHeight) =>
+        areaWidth > 0 && areaHeight > 0
+        && width >= areaWidth - FullScreenDragTolerance
+        && height >= areaHeight - FullScreenDragTolerance;
+
+    public static double ClampWidth(double requestedWidth, double minimumWidth, double availableWidth) =>
+        ClampDimension(requestedWidth, minimumWidth, availableWidth);
+
+    public static double ClampHeight(double requestedHeight, double minimumHeight, double availableHeight) =>
+        ClampDimension(requestedHeight, minimumHeight, availableHeight);
+
+    private static double ClampDimension(double requested, double minimum, double available)
     {
-        if (!double.IsFinite(availableHeight) || availableHeight <= 0)
+        var validRequest = double.IsFinite(requested) ? requested : minimum;
+        if (!double.IsFinite(available) || available <= 0)
         {
-            return Math.Max(minimumHeight, requestedHeight);
+            return Math.Max(minimum, validRequest);
         }
 
-        var effectiveMinimum = Math.Min(minimumHeight, availableHeight);
-        return Math.Clamp(requestedHeight, effectiveMinimum, availableHeight);
+        return Math.Clamp(validRequest, Math.Min(minimum, available), available);
     }
 }

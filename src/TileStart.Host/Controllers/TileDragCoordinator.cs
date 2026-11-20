@@ -1469,7 +1469,7 @@ internal sealed class TileDragCoordinator : IDisposable
         var availableWidth = _tileScrollViewer.ViewportWidth;
         if (!double.IsFinite(availableWidth) || availableWidth <= 0)
         {
-            availableWidth = _tilePane.ActualWidth - _tileScrollViewer.Margin.Left;
+            availableWidth = _tilePane.ActualWidth - _tileScrollViewer.Margin.Left - _tileScrollViewer.Padding.Right;
         }
 
         if (!double.IsFinite(availableWidth) || availableWidth <= 0)
@@ -1501,34 +1501,6 @@ internal sealed class TileDragCoordinator : IDisposable
 
     internal bool EnsureGroupGridCoordinates() =>
         Win10GroupGridLayout.EnsureCoordinates(_tileLayout, CurrentGroupColumnCount());
-
-    internal bool EnsureTileScrollBarClearance()
-    {
-        if (_tileScrollViewer.ComputedVerticalScrollBarVisibility != Visibility.Visible)
-        {
-            return false;
-        }
-
-        var scrollBar = FindVisualDescendants<ScrollBar>(_tileScrollViewer)
-            .FirstOrDefault(candidate => candidate.Orientation == System.Windows.Controls.Orientation.Vertical);
-        if (scrollBar is null)
-        {
-            return false;
-        }
-
-        var footprint = scrollBar.ActualWidth + scrollBar.Margin.Left + scrollBar.Margin.Right;
-        var viewportWidth = _tileScrollViewer.ViewportWidth;
-        var columns = Win10GroupWrapPanel.ColumnsForWidth(viewportWidth);
-        var deficit = Win10GroupWrapPanel.OverlayClearanceDeficit(viewportWidth, columns, footprint);
-        if (deficit < 0.1)
-        {
-            return false;
-        }
-
-        _window.Width += deficit;
-        _window.UpdateLayout();
-        return true;
-    }
 
     // =============================================
     // Folder hover and activation

@@ -97,43 +97,27 @@ public sealed class PerformanceGuardTests
         var path = Path.Combine(AppContext.BaseDirectory, "TestData", "Performance", "StartWindowController.cs");
         var source = File.ReadAllText(path);
         var method = source[source.IndexOf("public void SetMinimumWorkspaceColumns", StringComparison.Ordinal)..];
-        method = method[..method.IndexOf("public void SetWindowSource", StringComparison.Ordinal)];
+        method = method[..method.IndexOf("public void SaveAppListWidth", StringComparison.Ordinal)];
 
-        Assert.DoesNotContain("_preferredWorkspaceColumns =", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("_preferredWidth =", method, StringComparison.Ordinal);
         Assert.DoesNotContain("PersistPreferredSize", method, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void WindowWidthSnapDoesNotRelayoutTheWorkspaceEveryRenderFrame()
+    public void CornerResizeCommitsBothDimensionsBeforePositioning()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "TestData", "Performance", "StartWindowController.cs");
         var source = File.ReadAllText(path);
-        var method = source[source.IndexOf("private void SnapWindowWidthAfterResize()", StringComparison.Ordinal)..];
+        var method = source[source.IndexOf("private void CommitWindowResize(int hitTest)", StringComparison.Ordinal)..];
         method = method[..method.IndexOf("private void BeginLiveResize()", StringComparison.Ordinal)];
 
         Assert.DoesNotContain("CompositionTarget.Rendering += WindowWidthSnap_Rendering", source,
             StringComparison.Ordinal);
         Assert.DoesNotContain("private void WindowWidthSnap_Rendering", source, StringComparison.Ordinal);
-        Assert.Contains("_window.Width = targetWidth;", method, StringComparison.Ordinal);
-        Assert.Contains("_animateGroupReorderFrom(previousGroupPositions);", method, StringComparison.Ordinal);
-        Assert.True(
-            method.IndexOf("_preferredWorkspaceColumns = calculatedColumns;", StringComparison.Ordinal)
-            < method.IndexOf("PositionOnCurrentMonitor();", StringComparison.Ordinal),
-            "The snapped column preference must be published before placement reads it.");
-    }
-
-    [Fact]
-    public void WindowWidthSnapKeepsTheHeightFromACornerResize()
-    {
-        var path = Path.Combine(AppContext.BaseDirectory, "TestData", "Performance", "StartWindowController.cs");
-        var source = File.ReadAllText(path);
-        var method = source[source.IndexOf("private void SnapWindowWidthAfterResize()", StringComparison.Ordinal)..];
-        method = method[..method.IndexOf("private void BeginLiveResize()", StringComparison.Ordinal)];
-
-        var captureHeight = method.IndexOf("_preferredHeight = currentHeight;", StringComparison.Ordinal);
         var placeWindow = method.IndexOf("PositionOnCurrentMonitor();", StringComparison.Ordinal);
-        Assert.True(captureHeight >= 0 && captureHeight < placeWindow,
-            "Placement must read the height from the completed resize before it saves the snapped window size.");
+        Assert.InRange(method.IndexOf("_preferredWidth = currentWidth;", StringComparison.Ordinal), 0, placeWindow - 1);
+        Assert.InRange(method.IndexOf("_preferredHeight = currentHeight;", StringComparison.Ordinal), 0, placeWindow - 1);
+        Assert.DoesNotContain("UpdateLayout()", method, StringComparison.Ordinal);
     }
 
     [Fact]

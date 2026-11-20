@@ -41,19 +41,6 @@ public sealed class Win10GroupWrapPanel : System.Windows.Controls.Panel
     internal static double RequiredWidth(int columns) =>
         TileWorkspaceMetrics.RequiredWidth(columns);
 
-    internal static double OverlayClearanceDeficit(
-        double viewportWidth,
-        int columns,
-        double scrollBarFootprint)
-    {
-        if (!double.IsFinite(viewportWidth) || !double.IsFinite(scrollBarFootprint))
-        {
-            return 0;
-        }
-
-        return Math.Max(0, RequiredWidth(columns) + Math.Max(0, scrollBarFootprint) - viewportWidth);
-    }
-
     internal static Win10GroupPanelSlot[] CalculateSlots(
         IReadOnlyList<Win10GroupPanelItem> items,
         int columns)

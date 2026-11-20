@@ -4,6 +4,22 @@ namespace TileStart.Host.Tests;
 
 public sealed class WindowSizeStoreTests
 {
+    [Fact]
+    public void VersionTwoReadsTheOldColumnCountAndHeight()
+    {
+        var result = WindowSizeStore.Deserialize("""{"Width":0,"Height":1243,"WorkspaceColumns":3,"Version":2}""");
+
+        Assert.Equal(new WindowSizePreference(StartWindowSizing.WidthForColumns(3), 1243, 260, false), result);
+    }
+
+    [Fact]
+    public void FullScreenRoundTripsWithoutLosingTheNormalWindowAndListWidths()
+    {
+        var size = new WindowSizePreference(1839, 960, 381, true);
+
+        Assert.Equal(size, WindowSizeStore.Deserialize(WindowSizeStore.Serialize(size)));
+    }
+
     [Theory]
     [InlineData(1)]
     [InlineData(2)]

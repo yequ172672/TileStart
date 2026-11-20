@@ -678,7 +678,7 @@
         <Grid x:Name="MainSurface" Background="Transparent">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="{x:Static local:Win10VisualMetrics.CollapsedNavigationGridLength}" />
-                <ColumnDefinition Width="{x:Static local:Win10VisualMetrics.AllAppsGridLength}" />
+                <ColumnDefinition x:Name="AppListColumn" Width="{x:Static local:Win10VisualMetrics.AllAppsGridLength}" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <!-- WinUI Acrylic 的 2% 噪声位于材质层而非内容层；保持磁贴 0.8 透明度和文字/图标清晰度。 -->
@@ -1117,12 +1117,13 @@
                 </Border.ContextMenu>
                 <ScrollViewer x:Name="TileScrollViewer"
                               Margin="{x:Static local:Win10VisualMetrics.TileScrollViewerMargin}"
+                              Padding="{x:Static local:Win10VisualMetrics.TileScrollViewerPadding}"
                               PanningMode="VerticalOnly"
                               utilities:SmoothScroll.IsEnabled="True"
                               Style="{StaticResource TileScrollViewerStyle}">
                     <ItemsControl x:Name="TileGroupsControl"
                                   Margin="0,0,0,20"
-                                  HorizontalAlignment="Center"
+                                  HorizontalAlignment="Stretch"
                                   ItemsSource="{Binding TileLayout.Groups}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
@@ -1714,6 +1715,41 @@
                     </Image.RenderTransform>
                 </Image>
             </Canvas>
+            <GridSplitter x:Name="AppListSplitter"
+                          Grid.Column="1"
+                          Width="8"
+                          Margin="0,12,0,12"
+                          HorizontalAlignment="Right"
+                          VerticalAlignment="Stretch"
+                          ResizeDirection="Columns"
+                          ResizeBehavior="CurrentAndNext"
+                          Cursor="SizeWE"
+                          Panel.ZIndex="4"
+                          AutomationProperties.Name="调整应用列表宽度"
+                          ToolTip="拖动以调整应用列表宽度"
+                          DragCompleted="AppListSplitter_DragCompleted"
+                          PreviewKeyUp="AppListSplitter_PreviewKeyUp">
+                <GridSplitter.Template>
+                    <ControlTemplate TargetType="GridSplitter">
+                        <Grid Background="Transparent">
+                            <Border x:Name="Divider"
+                                    Width="1"
+                                    HorizontalAlignment="Center"
+                                    Background="{DynamicResource TileStartDividerBrush}" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Divider" Property="Width" Value="2" />
+                                <Setter TargetName="Divider" Property="Background" Value="{DynamicResource TileStartControlStrokeBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Divider" Property="Width" Value="2" />
+                                <Setter TargetName="Divider" Property="Background" Value="{DynamicResource TileStartControlStrokeBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </GridSplitter.Template>
+            </GridSplitter>
             <Border Height="7"
                     Grid.ColumnSpan="3"
                     VerticalAlignment="Top"
