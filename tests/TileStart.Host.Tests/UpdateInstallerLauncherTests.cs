@@ -23,6 +23,8 @@ public sealed class UpdateInstallerLauncherTests
         Assert.Contains(startInfo.ArgumentList, argument => argument.Contains("-Wait -PassThru", StringComparison.Ordinal));
         Assert.Contains(startInfo.ArgumentList, argument => argument.Contains("ExitCode -eq 0", StringComparison.Ordinal));
         Assert.Contains(startInfo.ArgumentList, argument => argument.Contains("Remove-Item", StringComparison.Ordinal));
+        Assert.Contains(startInfo.ArgumentList, argument =>
+            argument.Contains("(Test-Path -LiteralPath $updateDirectory -PathType Container) -and", StringComparison.Ordinal));
         Assert.DoesNotContain(startInfo.ArgumentList,
             (string argument) => argument.Contains(installerPath, StringComparison.Ordinal));
     }

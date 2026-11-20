@@ -45,7 +45,9 @@ public sealed record DownloadedUpdate(UpdatePackageKind Kind, string Path, Versi
 
 public sealed class GitHubUpdateService
 {
-    private const string LatestReleaseApi = "https://api.github.com/repos/Narylr350/TileStart/releases/latest";
+    private const string Repository = "yequ172672/TileStart";
+    internal const string RepositoryUrl = "https://github.com/" + Repository;
+    private const string LatestReleaseApi = "https://api.github.com/repos/" + Repository + "/releases/latest";
     private const string InstallerAssetName = "TileStart-Setup-win-x64.exe";
     private const string PortableAssetName = "TileStart-portable-win-x64.zip";
     private const string ChecksumAssetName = "SHA256SUMS.txt";
@@ -135,15 +137,16 @@ public sealed class GitHubUpdateService
             throw new InvalidDataException($"无法识别 Release 版本：{release.TagName}");
         }
 
-        var releasePage = RequireHttpsUri(release.HtmlUrl, "Release 页面");
+        var releasePage = RequireReleaseUri(release.HtmlUrl, $"tag/{release.TagName}");
+        var downloadPath = $"download/{release.TagName}/";
         var assets = release.Assets ?? [];
         return new GitHubReleaseInfo(
             release.TagName!,
             NormalizeVersion(version),
             releasePage,
-            RequireAsset(assets, InstallerAssetName),
-            RequireAsset(assets, PortableAssetName),
-            RequireAsset(assets, ChecksumAssetName));
+            RequireAsset(assets, InstallerAssetName, downloadPath),
+            RequireAsset(assets, PortableAssetName, downloadPath),
+            RequireAsset(assets, ChecksumAssetName, downloadPath));
     }
 
     internal static string ReadExpectedSha256(string manifest, string fileName)
@@ -169,20 +172,21 @@ public sealed class GitHubUpdateService
         throw new InvalidDataException($"校验文件中缺少 {fileName} 的 SHA-256。");
     }
 
-    private static GitHubReleaseAsset RequireAsset(IEnumerable<ReleaseAssetResponse> assets, string name)
+    private static GitHubReleaseAsset RequireAsset(
+        IEnumerable<ReleaseAssetResponse> assets, string name, string downloadPath)
     {
         var asset = assets.SingleOrDefault(candidate => candidate.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
                     ?? throw new InvalidDataException($"GitHub Release 缺少资产：{name}");
-        return new GitHubReleaseAsset(name, RequireHttpsUri(asset.BrowserDownloadUrl, name));
+        return new GitHubReleaseAsset(name, RequireReleaseUri(asset.BrowserDownloadUrl, downloadPath + name));
     }
 
-    private static Uri RequireHttpsUri(string? value, string description)
+    private static Uri RequireReleaseUri(string? value, string releasePath)
     {
+        var expected = $"{RepositoryUrl}/releases/{releasePath}";
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
-            || uri.Scheme != Uri.UriSchemeHttps
-            || !uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
+            || !uri.AbsoluteUri.Equals(expected, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidDataException($"{description}的下载地址无效。");
+            throw new InvalidDataException($"{releasePath} 的地址与当前仓库或版本不匹配。");
         }
 
         return uri;

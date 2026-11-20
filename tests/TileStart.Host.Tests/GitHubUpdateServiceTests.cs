@@ -8,19 +8,19 @@ public sealed class GitHubUpdateServiceTests
     private const string ReleaseJson = """
                                                {
                                                  "tag_name": "v0.2.0",
-                                                 "html_url": "https://github.com/Narylr350/TileStart/releases/tag/v0.2.0",
+                                                 "html_url": "https://github.com/yequ172672/TileStart/releases/tag/v0.2.0",
                                                  "assets": [
                                                    {
                                                      "name": "TileStart-Setup-win-x64.exe",
-                                                     "browser_download_url": "https://github.com/Narylr350/TileStart/releases/download/v0.2.0/TileStart-Setup-win-x64.exe"
+                                                     "browser_download_url": "https://github.com/yequ172672/TileStart/releases/download/v0.2.0/TileStart-Setup-win-x64.exe"
                                                    },
                                                    {
                                                      "name": "TileStart-portable-win-x64.zip",
-                                                     "browser_download_url": "https://github.com/Narylr350/TileStart/releases/download/v0.2.0/TileStart-portable-win-x64.zip"
+                                                     "browser_download_url": "https://github.com/yequ172672/TileStart/releases/download/v0.2.0/TileStart-portable-win-x64.zip"
                                                    },
                                                    {
                                                      "name": "SHA256SUMS.txt",
-                                                     "browser_download_url": "https://github.com/Narylr350/TileStart/releases/download/v0.2.0/SHA256SUMS.txt"
+                                                     "browser_download_url": "https://github.com/yequ172672/TileStart/releases/download/v0.2.0/SHA256SUMS.txt"
                                                    }
                                                  ]
                                                }
@@ -32,6 +32,7 @@ public sealed class GitHubUpdateServiceTests
         var release = GitHubUpdateService.ParseRelease(ReleaseJson);
 
         Assert.Equal(new Version(0, 2, 0, 0), release.Version);
+        Assert.Equal("https://github.com/yequ172672/TileStart/releases/tag/v0.2.0", release.ReleasePage.AbsoluteUri);
         Assert.Equal(UpdatePackageKind.Installer, GitHubUpdateService.SelectPackage(release, true).Kind);
         Assert.Equal(UpdatePackageKind.PortableArchive, GitHubUpdateService.SelectPackage(release, false).Kind);
     }
@@ -64,12 +65,16 @@ public sealed class GitHubUpdateServiceTests
         Assert.Throws<InvalidDataException>(() => GitHubUpdateService.ParseRelease(json));
     }
 
-    [Fact]
-    public void RejectsAssetsOutsideGitHub()
+    [Theory]
+    [InlineData("https://example.com/TileStart-Setup-win-x64.exe")]
+    [InlineData("https://github.com/Narylr350/TileStart/releases/download/v0.2.0/TileStart-Setup-win-x64.exe")]
+    [InlineData("https://github.com/yequ172672/TileStart/releases/download/v0.2.1/TileStart-Setup-win-x64.exe")]
+    [InlineData("https://github.com/yequ172672/TileStart/releases/download/v0.2.0/SHA256SUMS.txt")]
+    public void RejectsAssetsOutsideTheExpectedForkReleaseAndFile(string uri)
     {
         var json = ReleaseJson.Replace(
-            "https://github.com/Narylr350/TileStart/releases/download/v0.2.0/TileStart-Setup-win-x64.exe",
-            "https://example.com/TileStart-Setup-win-x64.exe",
+            "https://github.com/yequ172672/TileStart/releases/download/v0.2.0/TileStart-Setup-win-x64.exe",
+            uri,
             StringComparison.Ordinal);
 
         Assert.Throws<InvalidDataException>(() => GitHubUpdateService.ParseRelease(json));

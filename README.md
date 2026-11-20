@@ -6,14 +6,14 @@
 
 **把 Windows 10 的磁贴开始菜单带回 Windows 11。**
 
-[![Release](https://img.shields.io/github/v/release/Narylr350/TileStart?display_name=tag&style=flat-square)](https://github.com/Narylr350/TileStart/releases/latest)
+[![Release](https://img.shields.io/github/v/release/yequ172672/TileStart?display_name=tag&style=flat-square)](https://github.com/yequ172672/TileStart/releases/latest)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D4?style=flat-square&logo=windows)
 ![Runtime](https://img.shields.io/badge/runtime-.NET%208-512BD4?style=flat-square&logo=dotnet)
 ![License](https://img.shields.io/badge/license-Apache--2.0-1D76DB?style=flat-square)
 
-[下载安装器](https://github.com/Narylr350/TileStart/releases/latest/download/TileStart-Setup-win-x64.exe) ·
-[下载便携版](https://github.com/Narylr350/TileStart/releases/latest/download/TileStart-portable-win-x64.zip) ·
-[查看最新发布](https://github.com/Narylr350/TileStart/releases/latest)
+[下载安装器](https://github.com/yequ172672/TileStart/releases/latest/download/TileStart-Setup-win-x64.exe) ·
+[下载便携版](https://github.com/yequ172672/TileStart/releases/latest/download/TileStart-portable-win-x64.zip) ·
+[查看最新发布](https://github.com/yequ172672/TileStart/releases/latest)
 
 </div>
 
@@ -22,7 +22,7 @@
 TileStart 在 Windows 11 上重新实现 Windows 10 的磁贴开始菜单：保留应用列表、分组磁贴和熟悉的操作方式，同时支持固定普通文件、便携软件、脚本、网址与自定义命令。
 
 > [!WARNING]
-> 当前安装器和可执行文件尚未进行 Authenticode 代码签名，Windows Defender SmartScreen 可能显示“未知发布者”。请只从本仓库的 [Releases](https://github.com/Narylr350/TileStart/releases) 页面下载，并用随 Release 提供的 `SHA256SUMS.txt` 校验文件。
+> 当前安装器和可执行文件尚未进行 Authenticode 代码签名，Windows Defender SmartScreen 可能显示“未知发布者”。请只从本仓库的 [Releases](https://github.com/yequ172672/TileStart/releases) 页面下载，并用随 Release 提供的 `SHA256SUMS.txt` 校验文件。
 
 ## 外观与主题
 
@@ -134,7 +134,8 @@ TileStart 面向 Windows 11，同时保留 Windows 10 适配。Windows 10 仅支
 - 非底部任务栏、任务栏自动隐藏、多显示器混合 DPI 仍需要扩大实机覆盖。
 - 传统 Win32 安装程序创建开始菜单快捷方式后可由目录监听及时刷新；纯 UWP/MSIX 安装、更新或卸载依赖独立的低频后台兜底扫描，应用列表最多可能延迟约 5 分钟更新。
 - 在包含大量磁贴和快捷方式的布局中，应用扫描完成后的最终图标匹配仍可能在后台持续数十秒；菜单可正常使用，当前正在消除重复的快捷方式身份解析。
-- 当前不提供后台自动更新、云同步、插件市场或视频背景；更新检查仅在用户从托盘主动触发时联网。
+- 可从托盘打开「TileStart 设置 → 维护与信息 → 关于 TileStart → 检查更新」。安装版经确认后下载 fork 的最新正式安装器并校验 SHA-256，退出当前 Host 后启动安装器。便携版下载并校验压缩包，由用户解压更新。检查更新由用户主动发起。
+- 当前不提供云同步、插件市场或视频背景。
 
 ## 问题反馈与诊断
 

@@ -79,6 +79,8 @@
 
 ## 发布自动化
 
+- `GitHubUpdateService` 从 `yequ172672/TileStart` 的最新正式 Release 检查更新。Release 页面和附件必须属于同一仓库及版本，安装器和便携包须通过对应 `SHA256SUMS.txt` 的校验。
+- 安装版复用完整安装器，由 `UpdateInstallerLauncher` 等 Host 退出后启动；便携版下载校验后交给用户解压。`Local Hotfix` 的 Actions 产物用于显式开发部署。
 - 用户要求发布明确版本（例如“发布 0.1.1”）时，默认在 `main` 上触发 GitHub Actions 的 `Release` 工作流并传入版本号，监控到完成后报告 Release 地址和产物；不再手工构建、计算校验值或逐个上传附件。
 - 每个 GitHub Release 必须填写面向用户的中文更新说明，至少概括本版新增、修复和重要兼容性变化；不能留空、只放 Full Changelog 链接或只依赖附件。工作流生成 Release 后检查正文，不完整时使用 `gh release edit` 补齐。
 - Release 成功后只报告版本、地址和产物；只有用户明确要求“更新本地”或“安装该版本”时，才下载并校验正式安装器，先通过 Host 的 `--shutdown` 正常卸载 Hook，再执行升级安装、恢复 Host，并核对安装版本与基本启动行为。

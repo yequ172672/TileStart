@@ -9,7 +9,7 @@ namespace TileStart.Host.About;
 
 public partial class AboutWindow : Window
 {
-    internal static readonly Uri ProjectUri = new("https://github.com/Narylr350/TileStart");
+    internal static readonly Uri ProjectUri = new(GitHubUpdateService.RepositoryUrl);
     private readonly Func<Window, Task> _checkForUpdates;
 
     public AboutWindow(Func<Window, Task> checkForUpdates)

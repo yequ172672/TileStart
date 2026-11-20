@@ -14,7 +14,7 @@ internal static class UpdateInstallerLauncher
         "if ($installerProcess.ExitCode -eq 0) { " +
         "Remove-Item -LiteralPath $env:TILESTART_UPDATE_PATH -Force -ErrorAction SilentlyContinue; " +
         "$updateDirectory = Split-Path -Parent $env:TILESTART_UPDATE_PATH; " +
-        "if (Test-Path -LiteralPath $updateDirectory -PathType Container -and " +
+        "if ((Test-Path -LiteralPath $updateDirectory -PathType Container) -and " +
         "((Get-ChildItem -LiteralPath $updateDirectory -Force | Measure-Object).Count -eq 0)) { " +
         "Remove-Item -LiteralPath $updateDirectory -Force -ErrorAction SilentlyContinue } }";
 
