@@ -21,8 +21,13 @@ public class StartWindowController : IDisposable
     private const int SpiSetWorkArea = 0x002F;
     private const uint MonitorDefaultToNearest = 2;
     private const int MdtEffectiveDpi = 0;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpFrameChanged = 0x0020;
+    private const int GwlExStyle = -20;
+    private const int WsExTopmost = 0x0008;
     private const uint AwHide = 0x00010000;
     private const uint AwBlend = 0x00080000;
     private const int DismissDurationMilliseconds = 150;
@@ -65,6 +70,7 @@ public class StartWindowController : IDisposable
 
     private readonly StartWindowLifecycle _foregroundLifecycle = new();
     private TaskbarEdge _taskbarEdge = TaskbarEdge.Bottom;
+    private nint _taskbarWindow;
     private int _foregroundActivationGeneration;
     private bool _allowClose;
     private bool _isDismissing;
@@ -396,6 +402,12 @@ public class StartWindowController : IDisposable
         var requested = handle != 0 && RequestForegroundWindow(handle);
         _window.Activate();
         _window.Focus();
+        var insertAfter = GetWindowInsertAfter();
+        if (handle != 0 && insertAfter != HwndTopmost)
+        {
+            // Activation raises the menu and its DWM shadow. Keep the taskbar above both.
+            SetWindowPos(handle, insertAfter, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate);
+        }
         var foreground = GetForegroundWindow();
         var acquired = foreground != 0 && ForegroundBelongsToStart(foreground);
         _foregroundLifecycle.ObserveForeground(
@@ -484,7 +496,9 @@ public class StartWindowController : IDisposable
         var dpi = GetMonitorDpi(monitor);
         var monitorRect = ToPixelRect(monitorInfo.Monitor);
         var workArea = ToPixelRect(monitorInfo.WorkArea);
-        var taskbarRect = FindTaskbarRect(monitor);
+        var taskbar = FindTaskbar(monitor);
+        _taskbarWindow = taskbar?.Handle ?? 0;
+        var taskbarRect = taskbar?.Bounds;
         var edge = StartWindowPlacement.InferTaskbarEdge(monitorRect, taskbarRect);
         _taskbarEdge = edge;
         var scale = 96.0 / dpi;
@@ -527,7 +541,7 @@ public class StartWindowController : IDisposable
         }
 
         ApplyWindowCornerPreference();
-        var positioned = SetWindowPos(handle, HwndTopmost, placement.Left, placement.Top, placement.Width,
+        var positioned = SetWindowPos(handle, GetWindowInsertAfter(), placement.Left, placement.Top, placement.Width,
             placement.Height, SwpNoActivate | SwpFrameChanged);
         DiagnosticLog.Write(
             $"Window placement: monitor={monitorRect}, work={ToPixelRect(monitorInfo.WorkArea)}, dpi={dpi}, " +
@@ -537,9 +551,14 @@ public class StartWindowController : IDisposable
             $"error={(positioned ? 0 : Marshal.GetLastWin32Error())}.");
     }
 
-    private static PixelRect? FindTaskbarRect(nint monitor)
+    private nint GetWindowInsertAfter() => !_isFullScreen && _taskbarWindow != 0 && IsNativeWindowVisible(_taskbarWindow)
+        && (GetWindowLongW(_taskbarWindow, GwlExStyle) & WsExTopmost) != 0
+        ? _taskbarWindow
+        : HwndTopmost;
+
+    private static (nint Handle, PixelRect Bounds)? FindTaskbar(nint monitor)
     {
-        PixelRect? result = null;
+        (nint Handle, PixelRect Bounds)? result = null;
         EnumWindows((window, _) =>
         {
             var className = new StringBuilder(64);
@@ -551,7 +570,7 @@ public class StartWindowController : IDisposable
                 return true;
             }
 
-            result = ToPixelRect(rect);
+            result = (window, ToPixelRect(rect));
             return false;
         }, 0);
         return result;
@@ -864,12 +883,12 @@ public class StartWindowController : IDisposable
         var suggested = Marshal.PtrToStructure<Rect>(suggestedRectPointer);
         SetWindowPos(
             window,
-            HwndTopmost,
+            0,
             suggested.Left,
             suggested.Top,
             Math.Max(1, suggested.Right - suggested.Left),
             Math.Max(1, suggested.Bottom - suggested.Top),
-            SwpNoActivate | SwpFrameChanged);
+            SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
         RequestDisplayChangeRefresh(MonitorFromRect(ref suggested, MonitorDefaultToNearest));
     }
 
@@ -961,6 +980,12 @@ public class StartWindowController : IDisposable
 
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(nint window, out Rect rect);
+
+    [DllImport("user32.dll", EntryPoint = "IsWindowVisible")]
+    private static extern bool IsNativeWindowVisible(nint window);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern int GetWindowLongW(nint window, int index);
 
     [DllImport("user32.dll")]
     private static extern nint MonitorFromWindow(nint window, uint flags);
