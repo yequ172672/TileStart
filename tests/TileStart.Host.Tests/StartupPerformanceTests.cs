@@ -4,6 +4,14 @@ namespace TileStart.Host.Tests;
 
 public sealed class StartupPerformanceTests
 {
+    [Fact]
+    public void MissingLoginTaskIsReportedAsDisabled()
+    {
+        var missingTaskName = $"TileStart-Tests-{Guid.NewGuid():N}";
+
+        Assert.False(StartupRegistration.IsScheduledTaskEnabled(missingTaskName));
+    }
+
     private static string HostSource(params string[] parts) => Path.Combine(
         [AppContext.BaseDirectory, "TestData", "HostSource", .. parts]);
 

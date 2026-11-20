@@ -20,7 +20,7 @@ public static class StartupRegistration
     private const int TaskPriorityNormal = 4;
     private const int FileNotFoundHResult = unchecked((int)0x80070002);
 
-    public static bool IsEnabled() => IsScheduledTaskEnabled() || IsLegacyRunEnabled();
+    public static bool IsEnabled() => IsScheduledTaskEnabled(GetTaskName()) || IsLegacyRunEnabled();
 
     public static bool SetEnabled(bool enabled)
     {
@@ -62,7 +62,7 @@ public static class StartupRegistration
         DiagnosticLog.Write("Login startup migrated from the delayed Run key to an immediate logon task.");
     }
 
-    private static bool IsScheduledTaskEnabled()
+    internal static bool IsScheduledTaskEnabled(string taskName)
     {
         object? service = null;
         object? root = null;
@@ -78,14 +78,11 @@ public static class StartupRegistration
             dynamic scheduler = service;
             scheduler.Connect();
             root = scheduler.GetFolder("\\");
-            task = ((dynamic)root).GetTask(GetTaskName());
+            task = ((dynamic)root).GetTask(taskName);
             return (bool)((dynamic)task).Enabled;
         }
-        catch (COMException exception) when (exception.HResult == FileNotFoundHResult)
-        {
-            return false;
-        }
-        catch (Exception exception) when (exception is COMException or UnauthorizedAccessException or SecurityException)
+        catch (Exception exception) when (exception is COMException or FileNotFoundException
+                                          or UnauthorizedAccessException or SecurityException)
         {
             return false;
         }
@@ -169,7 +166,8 @@ public static class StartupRegistration
                 null);
             return registeredTask is not null;
         }
-        catch (Exception exception) when (exception is COMException or UnauthorizedAccessException or SecurityException)
+        catch (Exception exception) when (exception is COMException or FileNotFoundException
+                                          or UnauthorizedAccessException or SecurityException)
         {
             DiagnosticLog.Write($"Unable to register immediate login task: {exception.Message}");
             return false;
@@ -208,7 +206,8 @@ public static class StartupRegistration
             ((dynamic)root).DeleteTask(GetTaskName(), 0);
             return true;
         }
-        catch (COMException exception) when (exception.HResult == FileNotFoundHResult)
+        catch (Exception exception) when (exception is FileNotFoundException
+                                          || exception is COMException && exception.HResult == FileNotFoundHResult)
         {
             return true;
         }
