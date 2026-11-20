@@ -46,7 +46,8 @@ public static class AppThemeManager
         CurrentStyle = style;
         var dictionaries = resources.MergedDictionaries;
         var existing = dictionaries.FirstOrDefault(dictionary => IsThemeDictionary(dictionary.Source));
-        var replacement = new ResourceDictionary { Source = GetThemeUri(style, ResolveDarkMode(colorMode)) };
+        var useDarkMode = ResolveDarkMode(colorMode);
+        var replacement = new ResourceDictionary { Source = GetThemeUri(style, useDarkMode) };
         if (existing is null)
         {
             dictionaries.Insert(0, replacement);
@@ -57,7 +58,7 @@ public static class AppThemeManager
             dictionaries[index] = replacement;
         }
 
-        ApplyDefaultTileBackground(resources, style);
+        ApplyDefaultTileColors(resources, style, useDarkMode);
     }
 
     private static bool IsThemeDictionary(Uri? source)
@@ -74,13 +75,16 @@ public static class AppThemeManager
     /// Feeds the theme's tile colour to <see cref="TileItem"/> so tiles the user never recoloured
     /// follow the active theme.
     /// </summary>
-    private static void ApplyDefaultTileBackground(ResourceDictionary resources, AppThemeStyle style)
+    private static void ApplyDefaultTileColors(ResourceDictionary resources, AppThemeStyle style, bool useDarkMode)
     {
         if (resources["TileStartDefaultTileBackgroundBrush"] is SolidColorBrush brush)
         {
             TileItem.SetThemeDefaultBackgroundColor(
                 brush.Color.ToString(),
-                Math.Clamp(brush.Opacity, 0, 1));
+                Math.Clamp(brush.Opacity, 0, 1),
+                style == AppThemeStyle.Windows11 && !useDarkMode
+                    ? resources["TileStartTextPrimaryBrush"] as SolidColorBrush
+                    : null);
         }
     }
 }

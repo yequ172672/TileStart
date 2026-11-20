@@ -25,6 +25,22 @@ public class TileItemBackgroundColorTests : IDisposable
     }
 
     [Fact]
+    public void LightTileThemeRetintsDefaultTextAndPreservesDecoratedTiles()
+    {
+        var legacyDefault = JsonSerializer.Deserialize<TileItem>("""{"ForegroundColor":"#FFFFFF"}""")!;
+        var customColor = new TileItem { ForegroundColor = "Red" };
+        var customBackground = new TileItem { BackgroundColor = "#112233" };
+        var customImage = new TileItem { BackgroundImagePath = "tile.png" };
+
+        TileItem.SetThemeDefaultBackgroundColor("#F3F3F3", foreground: Brushes.Black);
+
+        Assert.Same(Brushes.Black, legacyDefault.ForegroundBrush);
+        Assert.Equal(Colors.Red, Assert.IsType<SolidColorBrush>(customColor.ForegroundBrush).Color);
+        Assert.Same(Brushes.White, customBackground.ForegroundBrush);
+        Assert.Same(Brushes.White, customImage.ForegroundBrush);
+    }
+
+    [Fact]
     public void DefaultTileKeepsThemeColorSeparateFromItsSurfaceOpacity()
     {
         TileItem.SetThemeDefaultBackgroundColor("#5A353B", 0.8);

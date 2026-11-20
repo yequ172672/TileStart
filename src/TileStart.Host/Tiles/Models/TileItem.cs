@@ -19,6 +19,7 @@ public sealed class TileItem : INotifyPropertyChanged
     public static string ThemeDefaultBackgroundColor { get; private set; } = "#3A3A3A";
 
     private static MediaBrush ThemeDefaultBackgroundBrush { get; set; } = CreateFrozenBrush("#3A3A3A");
+    private static MediaBrush ThemeDefaultForegroundBrush { get; set; } = MediaBrushes.White;
     private static readonly object ThemeFollowersLock = new();
     private static readonly List<WeakReference<TileItem>> ThemeFollowers = [];
 
@@ -26,7 +27,7 @@ public sealed class TileItem : INotifyPropertyChanged
     /// Applies the active theme's default tile colour. Tiles whose
     /// <see cref="HasCustomBackgroundColor"/> is false follow it.
     /// </summary>
-    public static void SetThemeDefaultBackgroundColor(string color, double opacity = 1)
+    public static void SetThemeDefaultBackgroundColor(string color, double opacity = 1, MediaBrush? foreground = null)
     {
         if (string.IsNullOrWhiteSpace(color))
         {
@@ -40,6 +41,7 @@ public sealed class TileItem : INotifyPropertyChanged
         {
             ThemeDefaultBackgroundColor = normalizedColor;
             ThemeDefaultBackgroundBrush = backgroundBrush;
+            ThemeDefaultForegroundBrush = foreground ?? MediaBrushes.White;
             var liveFollowers = new List<TileItem>(ThemeFollowers.Count);
             for (var index = ThemeFollowers.Count - 1; index >= 0; index--)
             {
@@ -256,6 +258,7 @@ public sealed class TileItem : INotifyPropertyChanged
             OnPropertyChanged();
             OnPropertyChanged(nameof(HasCustomBackgroundColor));
             OnPropertyChanged(nameof(BackgroundBrush));
+            OnPropertyChanged(nameof(ForegroundBrush));
         }
     }
 
@@ -281,6 +284,7 @@ public sealed class TileItem : INotifyPropertyChanged
             OnPropertyChanged();
             OnPropertyChanged(nameof(BackgroundColor));
             OnPropertyChanged(nameof(BackgroundBrush));
+            OnPropertyChanged(nameof(ForegroundBrush));
         }
     }
 
@@ -298,6 +302,7 @@ public sealed class TileItem : INotifyPropertyChanged
         OnPropertyChanged(nameof(BackgroundColor));
         OnPropertyChanged(nameof(HasCustomBackgroundColor));
         OnPropertyChanged(nameof(BackgroundBrush));
+        OnPropertyChanged(nameof(ForegroundBrush));
     }
 
     private void ApplyThemeDefaultBackgroundBrush(MediaBrush backgroundBrush)
@@ -310,6 +315,7 @@ public sealed class TileItem : INotifyPropertyChanged
         _backgroundBrush = backgroundBrush;
         OnPropertyChanged(nameof(BackgroundColor));
         OnPropertyChanged(nameof(BackgroundBrush));
+        OnPropertyChanged(nameof(ForegroundBrush));
     }
 
     public string ForegroundColor
@@ -333,7 +339,15 @@ public sealed class TileItem : INotifyPropertyChanged
     public string BackgroundImagePath
     {
         get => _backgroundImagePath;
-        set => SetText(ref _backgroundImagePath, value);
+        set
+        {
+            var previous = _backgroundImagePath;
+            SetText(ref _backgroundImagePath, value);
+            if (previous != _backgroundImagePath)
+            {
+                OnPropertyChanged(nameof(ForegroundBrush));
+            }
+        }
     }
 
     public double BackgroundImageScale
@@ -483,7 +497,13 @@ public sealed class TileItem : INotifyPropertyChanged
 
     [JsonIgnore] public MediaBrush BackgroundBrush => _backgroundBrush;
 
-    [JsonIgnore] public MediaBrush ForegroundBrush => _foregroundBrush;
+    // Existing layouts use #FFFFFF for the default. On an undecorated tile,
+    // follow the theme so that default text stays legible on a light backdrop.
+    [JsonIgnore] public MediaBrush ForegroundBrush =>
+        !_hasCustomBackgroundColor && _backgroundImagePath.Length == 0
+            && _foregroundColor.Equals("#FFFFFF", StringComparison.OrdinalIgnoreCase)
+            ? ThemeDefaultForegroundBrush
+            : _foregroundBrush;
 
     [JsonIgnore]
     public ImageSource? Icon
