@@ -1,6 +1,9 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Windows.Threading;
+using Microsoft.Win32;
+using Microsoft.Win32.SafeHandles;
 using TileStart.Host.Utilities;
 
 namespace TileStart.Host.Updates;
@@ -9,6 +12,9 @@ internal sealed class IdleUpdateCoordinator : IDisposable
 {
     private static readonly string PreferencesPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TileStart", "automatic-update.json");
+    private const string UacPolicyKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+    private const int TokenElevationType = 18;
+    private const int TokenElevationTypeLimited = 3;
 
     private readonly GitHubUpdateService _service;
     private readonly DispatcherTimer _timer;
@@ -180,7 +186,7 @@ internal sealed class IdleUpdateCoordinator : IDisposable
         }
 
         if (update.Kind is not (UpdatePackageKind.Installer or UpdatePackageKind.PatchInstaller)
-            || WasAttemptedRecently(update.Version) || (_installedCopy && !IsElevated()) || !CanWriteInstallDirectory())
+            || WasAttemptedRecently(update.Version) || !CanInstallUnattended())
         {
             return false;
         }
@@ -193,6 +199,38 @@ internal sealed class IdleUpdateCoordinator : IDisposable
     }
 
     private bool WasAttemptedRecently(Version version) => _preferences.WasAttemptedRecently(version, DateTimeOffset.UtcNow);
+
+    private bool CanInstallUnattended()
+    {
+        if (!_installedCopy) { return CanWriteInstallDirectory(); }
+
+        using var identity = WindowsIdentity.GetCurrent(TokenAccessLevels.Query);
+        if (new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator))
+        {
+            return CanWriteInstallDirectory();
+        }
+
+        return AllowsAutomaticElevation(identity.AccessToken);
+    }
+
+    internal static bool AllowsAutomaticElevation(SafeAccessTokenHandle token)
+    {
+        if (!GetTokenInformation(token, TokenElevationType, out var type, sizeof(int), out _)
+            || type != TokenElevationTypeLimited)
+        {
+            return false;
+        }
+
+        // The existing installer requests elevation itself. A filtered administrator can
+        // take this path only if Windows already grants elevation without prompting.
+        using var policy = Registry.LocalMachine.OpenSubKey(UacPolicyKey);
+        return policy?.GetValue("EnableLUA") is 1 && policy.GetValue("ConsentPromptBehaviorAdmin") is 0;
+    }
+
+    [DllImport("advapi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetTokenInformation(SafeAccessTokenHandle token, int informationClass,
+        out int information, int length, out int returnedLength);
 
     private bool CanWriteInstallDirectory()
     {
@@ -219,12 +257,6 @@ internal sealed class IdleUpdateCoordinator : IDisposable
         if (_staged is not { } update) { return; }
         _staged = null;
         GitHubUpdateService.DeleteDownload(update.Path);
-    }
-
-    private static bool IsElevated()
-    {
-        using var identity = WindowsIdentity.GetCurrent();
-        return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
     }
 
     public void Dispose()
