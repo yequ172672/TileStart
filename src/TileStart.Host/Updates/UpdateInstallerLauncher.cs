@@ -16,8 +16,10 @@ internal static class UpdateInstallerLauncher
             try { $hash = [BitConverter]::ToString($sha256.ComputeHash($file)).Replace('-', ''); }
             finally { $sha256.Dispose(); $file.Dispose(); }
             if ($hash -ne $env:TILESTART_UPDATE_SHA256) { throw 'Installer SHA-256 mismatch.'; }
-            $arguments = @('/SP-', '/SILENT', '/NORESTART', '/RESTARTEXITCODE=9', '/NOCLOSEAPPLICATIONS',
+            $arguments = @('/SP-', '/NORESTART', '/RESTARTEXITCODE=9', '/NOCLOSEAPPLICATIONS',
                            ('/DIR="' + $directory + '"'), ('/TILESTARTUPDATE=' + $env:TILESTART_UPDATE_MODE));
+            if ($env:TILESTART_UPDATE_UNATTENDED -eq '1') { $arguments += '/VERYSILENT', '/SUPPRESSMSGBOXES'; }
+            else { $arguments += '/SILENT'; }
             if ($env:TILESTART_UPDATE_MODE -eq 'portable') { $arguments += '/CURRENTUSER'; }
             $installerProcess = Start-Process -FilePath $env:TILESTART_UPDATE_PATH -ArgumentList $arguments -Wait -PassThru;
             if ($installerProcess.ExitCode -ne 0) { throw "Update installer returned $($installerProcess.ExitCode)."; }
@@ -33,13 +35,13 @@ internal static class UpdateInstallerLauncher
         }
         """;
 
-    public static void LaunchAfterHostExit(DownloadedUpdate update, string hostPath, int hostProcessId, bool portable)
+    public static void LaunchAfterHostExit(DownloadedUpdate update, string hostPath, int hostProcessId, bool portable, bool unattended = false)
     {
-        _ = Process.Start(CreateStartInfo(update, hostPath, hostProcessId, portable))
+        _ = Process.Start(CreateStartInfo(update, hostPath, hostProcessId, portable, unattended))
             ?? throw new InvalidOperationException("无法启动更新安装助手。");
     }
 
-    internal static ProcessStartInfo CreateStartInfo(DownloadedUpdate update, string hostPath, int hostProcessId, bool portable)
+    internal static ProcessStartInfo CreateStartInfo(DownloadedUpdate update, string hostPath, int hostProcessId, bool portable, bool unattended = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(hostPath);
         if (hostProcessId <= 0)
@@ -76,6 +78,7 @@ internal static class UpdateInstallerLauncher
         startInfo.Environment["TILESTART_UPDATE_PID"] = hostProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
         startInfo.Environment["TILESTART_UPDATE_SHA256"] = update.Sha256;
         startInfo.Environment["TILESTART_UPDATE_MODE"] = portable ? "portable" : "installed";
+        startInfo.Environment["TILESTART_UPDATE_UNATTENDED"] = unattended ? "1" : "0";
         return startInfo;
     }
 }

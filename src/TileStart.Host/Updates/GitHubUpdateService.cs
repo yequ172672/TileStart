@@ -160,23 +160,46 @@ public sealed class GitHubUpdateService
         var directory = CreateDownloadDirectory(version);
         Directory.CreateDirectory(directory);
         var destination = Path.Combine(directory, package.Asset.Name);
-        await DownloadFileAsync(package.Asset.DownloadUri, destination, MaximumPackageBytes, progress,
-            cancellationToken);
-
-        progress?.Report(new UpdateProgressInfo(UpdateProgressStage.VerifyingPackage));
-        string actualHash;
-        await using (var stream = File.OpenRead(destination))
+        try
         {
-            actualHash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
-        }
-        if (!actualHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
-        {
-            File.Delete(destination);
-            throw new InvalidDataException("下载文件的 SHA-256 校验失败，已删除该文件。");
-        }
+            await DownloadFileAsync(package.Asset.DownloadUri, destination, MaximumPackageBytes, progress,
+                cancellationToken);
 
-        progress?.Report(new UpdateProgressInfo(UpdateProgressStage.PreparingInstall));
-        return new DownloadedUpdate(package.Kind, destination, version, expectedHash);
+            progress?.Report(new UpdateProgressInfo(UpdateProgressStage.VerifyingPackage));
+            string actualHash;
+            await using (var stream = File.OpenRead(destination))
+            {
+                actualHash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!actualHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("下载文件的 SHA-256 校验失败。");
+            }
+
+            progress?.Report(new UpdateProgressInfo(UpdateProgressStage.PreparingInstall));
+            return new DownloadedUpdate(package.Kind, destination, version, expectedHash);
+        }
+        catch
+        {
+            DeleteDownload(destination);
+            throw;
+        }
+    }
+
+    internal static void DeleteDownload(string path)
+    {
+        try
+        {
+            File.Delete(path);
+            var directory = Path.GetDirectoryName(path)!;
+            if (Directory.Exists(directory)) { Directory.Delete(directory); }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            DiagnosticLog.Write($"Unable to clean an update download: {exception.Message}");
+        }
     }
 
     public static bool IsInstalledCopy(string? executablePath)

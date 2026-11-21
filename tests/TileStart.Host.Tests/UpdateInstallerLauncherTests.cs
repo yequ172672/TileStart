@@ -23,6 +23,7 @@ public sealed class UpdateInstallerLauncherTests
         Assert.Equal("1234", startInfo.Environment["TILESTART_UPDATE_PID"]);
         Assert.Equal(hostPath, startInfo.Environment["TILESTART_UPDATE_HOST"]);
         Assert.Equal("portable", startInfo.Environment["TILESTART_UPDATE_MODE"]);
+        Assert.Equal("0", startInfo.Environment["TILESTART_UPDATE_UNATTENDED"]);
         Assert.Equal(update.Sha256, startInfo.Environment["TILESTART_UPDATE_SHA256"]);
         Assert.Contains(startInfo.ArgumentList, argument => argument.Contains("WaitForExit()", StringComparison.Ordinal));
         Assert.Contains(startInfo.ArgumentList, argument => argument.Contains("-Wait -PassThru", StringComparison.Ordinal));
@@ -32,6 +33,18 @@ public sealed class UpdateInstallerLauncherTests
             argument.Contains("Start-Process -FilePath $env:TILESTART_UPDATE_HOST", StringComparison.Ordinal));
         Assert.DoesNotContain(startInfo.ArgumentList,
             (string argument) => argument.Contains(installerPath, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void UnattendedLaunchSeparatelyRequestsAQuietInstaller()
+    {
+        var installer = Path.Combine(Path.GetTempPath(), "TileStart", "updates", "v0.2.8", "attempt", "setup.exe");
+        var update = new DownloadedUpdate(UpdatePackageKind.PatchInstaller, installer, new Version(0, 2, 8), new string('a', 64));
+        var start = UpdateInstallerLauncher.CreateStartInfo(update, @"C:\TileStart\TileStart.Host.exe", 1234,
+            portable: true, unattended: true);
+
+        Assert.Equal("1", start.Environment["TILESTART_UPDATE_UNATTENDED"]);
+        Assert.Contains(start.ArgumentList, argument => argument.Contains("/VERYSILENT", StringComparison.Ordinal));
     }
 
     [Fact]

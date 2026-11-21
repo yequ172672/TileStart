@@ -114,6 +114,31 @@ public sealed class GitHubUpdateServiceTests
         Assert.Contains(Path.Combine("TileStart", "updates", "v0.2.0"), first, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task CancellationDuringVerificationRemovesTheDownloadedPackage()
+    {
+        var release = GitHubUpdateService.ParseRelease(ReleaseJson) with { Version = new Version(0, 0, Random.Shared.Next(100_000, int.MaxValue)) };
+        var asset = release.PortableArchive;
+        var assets = new Dictionary<string, string>
+        {
+            [asset.Name] = "portable archive",
+            [release.Checksums.Name] = $"{Hash("portable archive")} *{asset.Name}",
+        };
+        using var client = new HttpClient(new ReleaseAssetHandler(assets));
+        using var cancellation = new CancellationTokenSource();
+        var service = new GitHubUpdateService(client);
+        var parent = Path.GetDirectoryName(GitHubUpdateService.CreateDownloadDirectory(release.Version))!;
+        var progress = new UpdateProgress(update =>
+        {
+            if (update.Stage == UpdateProgressStage.VerifyingPackage) { cancellation.Cancel(); }
+        });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.DownloadAsync(release,
+            new Version(0, 0, 0), null, progress, cancellation.Token));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(parent));
+        Directory.Delete(parent);
+    }
+
     [Theory]
     [InlineData(true, true, true, "patch", UpdatePackageKind.PatchInstaller)]
     [InlineData(false, true, true, "patch", UpdatePackageKind.PatchInstaller)]
@@ -206,6 +231,11 @@ public sealed class GitHubUpdateServiceTests
     }
 
     private static string Hash(string content) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
+
+    private sealed class UpdateProgress(Action<UpdateProgressInfo> onProgress) : IProgress<UpdateProgressInfo>
+    {
+        public void Report(UpdateProgressInfo value) => onProgress(value);
+    }
 
     private sealed class ReleaseAssetHandler(IReadOnlyDictionary<string, string> assets) : HttpMessageHandler
     {

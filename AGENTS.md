@@ -88,16 +88,22 @@
 | --- | --- |
 | `scripts/Build-ReleaseUpdate.ps1` | 验证上一正式版的便携包，生成更新清单、可选热补丁和发布校验文件。 |
 | `src/TileStart.Host/Updates/UpdateReleaseManifest.cs` | 解析经校验的清单，检查基线版本和安装文件 SHA-256。 |
+| `src/TileStart.Host/Updates/AutomaticUpdatePreferences.cs` | 保存本机自动更新开关和最近安装尝试，默认关闭。 |
+| `src/TileStart.Host/Updates/UpdateIdleMonitor.cs` | 检测会话键鼠、XInput 与 Raw Input 手柄活动及 Windows 忙碌状态。 |
+| `src/TileStart.Host/Updates/IdleUpdateCoordinator.cs` | 闲置时检查、暂存或安装更新，与手动更新共享已校验的下载。 |
+| `tests/TileStart.Host.Tests/IdleUpdateTests.cs` | 验证默认关闭、连续闲置时长和同版本安装重试限制。 |
 
 ### Dependencies
 
 - Release 构建使用现有 GitHub CLI 获取基线附件，使用现有 Inno Setup 编译完整安装器和热补丁。不含运行时版需要系统安装 .NET 8 Desktop Runtime（x64）。运行时交接使用系统自带的 Windows PowerShell。
+- 自动更新使用系统自带的 `GetLastInputInfo`、Raw Input、XInput 1.4 与 Shell / 电源状态接口，不引入第三方依赖。
 
 ### Common Patterns
 
 - `GitHubUpdateService` 只接受 fork 同版本 Release 附件，并通过对应的 `SHA256SUMS.txt` 校验。基线版本及文件匹配时优先下载热补丁，缺少补丁或验证失败时使用完整包。
 - Release 同时提供自包含和不含运行时的完整安装器。后者从实际 `runtimeconfig.json` 辨认安装类型，自更新保持该类型，从自包含版切换时先暂存已知随包运行库，安装失败则恢复。运行时、外部依赖或文件集合变化时跳过热补丁，补丁写入前复查自包含版基线。
 - `UpdateInstallerLauncher` 等待 Host 退出，将包覆盖到当前目录并从原会话重新启动。便携自更新采用 Inno Setup 当前用户模式，跳过卸载器、快捷方式、注册表和安装标记。早期 Release 仍支持手动解压便携包。`Local Hotfix` 继续用于显式开发部署。
+- 自动更新由用户在设置中开启，连续观测一小时无输入后才允许检查；休眠或观测中断后重新计时。全屏、演示、屏幕保持点亮及 TileStart 界面活动会阻止或取消后台下载，覆盖前再次检查。需管理员授权时仅暂存，手动确认沿用现有安装流程。对同版本的自动安装尝试间隔至少 24 小时。
 
 - 用户要求发布明确版本（例如“发布 0.1.1”）时，默认在 `main` 上触发 GitHub Actions 的 `Release` 工作流并传入版本号，监控到完成后报告 Release 地址和产物；不再手工构建、计算校验值或逐个上传附件。
 - 每个 GitHub Release 必须填写面向用户的中文更新说明，至少概括本版新增、修复和重要兼容性变化；不能留空、只放 Full Changelog 链接或只依赖附件。工作流生成 Release 后检查正文，不完整时使用 `gh release edit` 补齐。

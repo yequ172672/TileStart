@@ -244,6 +244,21 @@
                                Text="维护与信息" />
                     <Border Padding="18,16" Style="{StaticResource TileStartCardStyle}">
                         <StackPanel>
+                            <CheckBox x:Name="AutomaticUpdateBox"
+                                      Content="闲置时自动更新"
+                                      AutomationProperties.HelpText="连续 1 小时没有键鼠或手柄输入时检查更新。"
+                                      Style="{StaticResource TileStartCheckBoxStyle}" />
+                            <TextBlock Margin="0,4,0,0"
+                                       Foreground="{StaticResource TileStartTextSecondaryBrush}"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       Text="连续闲置 1 小时后检查更新。全屏、演示或媒体保持屏幕点亮时暂停；需要管理员授权时先下载，可在「关于」完成安装。" />
+                            <TextBlock x:Name="StagedUpdateStatus"
+                                       Margin="0,6,0,0"
+                                       Foreground="{StaticResource TileStartTextSecondaryBrush}"
+                                       TextWrapping="Wrap"
+                                       Visibility="Collapsed" />
+                            <Border Height="1" Margin="0,14" Background="{StaticResource TileStartDividerBrush}" />
                             <StackPanel x:Name="NativePinsSection">
                                 <Grid>
                                     <Grid.ColumnDefinitions>

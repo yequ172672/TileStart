@@ -18,6 +18,7 @@ public partial class SettingsWindow : Window
     private readonly Action<Window> _openAbout;
     private readonly Action<AppThemeStyle, AppColorMode> _changeAppearance;
     private readonly Func<CancellationToken, Task<NativeStartImportResult>> _importNativePins;
+    private readonly Action<bool> _changeAutomaticUpdates;
     private readonly bool _initialStartupEnabled;
 
     public AppThemeStyle SelectedThemeStyle { get; private set; }
@@ -32,7 +33,10 @@ public partial class SettingsWindow : Window
         Action<Window> openBackupAndRestore,
         Action<Window> openAbout,
         Action<AppThemeStyle, AppColorMode> changeAppearance,
-        Func<CancellationToken, Task<NativeStartImportResult>> importNativePins)
+        Func<CancellationToken, Task<NativeStartImportResult>> importNativePins,
+        bool automaticUpdatesEnabled,
+        Version? stagedUpdate,
+        Action<bool> changeAutomaticUpdates)
     {
         InitializeComponent();
         SelectedThemeStyle = currentThemeStyle;
@@ -41,6 +45,13 @@ public partial class SettingsWindow : Window
         _openAbout = openAbout;
         _changeAppearance = changeAppearance;
         _importNativePins = importNativePins;
+        _changeAutomaticUpdates = changeAutomaticUpdates;
+        AutomaticUpdateBox.IsChecked = automaticUpdatesEnabled;
+        if (stagedUpdate is not null)
+        {
+            StagedUpdateStatus.Text = $"版本 {stagedUpdate.ToString(3)} 已下载，可在「关于 TileStart」完成安装。";
+            StagedUpdateStatus.Visibility = Visibility.Visible;
+        }
         NativePinsSection.Visibility = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -64,6 +75,17 @@ public partial class SettingsWindow : Window
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
+        try
+        {
+            _changeAutomaticUpdates(AutomaticUpdateBox.IsChecked == true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Win32Exception)
+        {
+            DiagnosticLog.Write($"Unable to change automatic-update preferences: {exception.Message}");
+            TileStartMessageDialog.Show(this, "无法保存自动更新设置", exception.Message, TileStartMessageKind.Error);
+            return;
+        }
+
         SelectedStartupEnabled = StartupBox.IsChecked == true;
         SelectedThemeStyle = ResolveSelectedThemeStyle(
             Windows10Choice.IsChecked,

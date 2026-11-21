@@ -22,6 +22,7 @@ public partial class App : System.Windows.Application
     private WinKeyHook? _winKeyHook;
     private BackupRestoreRequest? _pendingRestore;
     private readonly GitHubUpdateService _updateService = new();
+    private IdleUpdateCoordinator? _automaticUpdate;
     private bool _isPaused;
     private bool _isCheckingForUpdates;
     private bool _isSystemThemeSubscribed;
@@ -106,6 +107,12 @@ public partial class App : System.Windows.Application
             _resolvedDarkMode,
             OpenSettings,
             ExitApplication);
+        if (Environment.ProcessPath is { } hostPath)
+        {
+            _automaticUpdate = new IdleUpdateCoordinator(_updateService, Dispatcher, hostPath,
+                () => _isCheckingForUpdates || _isRestartScheduled || Windows.OfType<Window>().Any(window => window.IsVisible),
+                update => InstallUpdate(update, hostPath, unattended: true));
+        }
         if (e.Args.Length > 0 && startupRequest.Kind is not HostRequestKind.Exit and not HostRequestKind.Open)
         {
             Dispatcher.BeginInvoke(() => HandleHostRequest(startupRequest));
@@ -228,7 +235,10 @@ public partial class App : System.Windows.Application
                 OpenBackupAndRestore,
                 OpenAbout,
                 ChangeAppearance,
-                ((MainWindow)MainWindow).ImportNativeStartPinsAsync);
+                ((MainWindow)MainWindow).ImportNativeStartPinsAsync,
+                _automaticUpdate?.Enabled == true,
+                _automaticUpdate?.StagedVersion,
+                enabled => _automaticUpdate?.SetEnabled(enabled));
             _settingsWindow = dialog;
             var owner = ResolveSettingsOwner(dialog);
             if (owner is not null)
@@ -278,7 +288,7 @@ public partial class App : System.Windows.Application
 
     private async Task CheckForUpdatesAsync(Window owner)
     {
-        if (_isCheckingForUpdates)
+        if (_isCheckingForUpdates || _automaticUpdate?.IsDownloading == true)
         {
             TileStartMessageDialog.Show(owner, "检查更新", "正在检查更新，请稍候。");
             return;
@@ -304,7 +314,6 @@ public partial class App : System.Windows.Application
             }
 
             var hostPath = Environment.ProcessPath ?? throw new InvalidOperationException("无法找到当前程序路径。");
-            var installedCopy = GitHubUpdateService.IsInstalledCopy(hostPath);
             var shouldDownload = TileStartMessageDialog.Confirm(
                 owner,
                 "发现新版本",
@@ -320,20 +329,20 @@ public partial class App : System.Windows.Application
 
             DiagnosticLog.Write("Update download accepted.");
             using var downloadTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-            progressWindow = new UpdateProgressWindow(owner);
-            var update = progressWindow.Run(
-                (progress, cancellationToken) =>
-                    _updateService.DownloadAsync(release, currentVersion, hostPath, progress, cancellationToken),
-                downloadTimeout.Token);
+            var update = _automaticUpdate?.TakeStaged(release.Version);
+            if (update is null)
+            {
+                progressWindow = new UpdateProgressWindow(owner);
+                update = progressWindow.Run(
+                    (progress, cancellationToken) =>
+                        _updateService.DownloadAsync(release, currentVersion, hostPath, progress, cancellationToken),
+                    downloadTimeout.Token);
+            }
             DiagnosticLog.Write(
                 $"Update package ready: version={update.Version.ToString(3)}, kind={update.Kind}.");
             if (update.Kind is UpdatePackageKind.Installer or UpdatePackageKind.PatchInstaller)
             {
-                // 助手先等待当前 Host 完全退出，安装器才会覆盖文件；否则 Injector/Hook 清理与安装会发生竞态。
-                UpdateInstallerLauncher.LaunchAfterHostExit(update, hostPath, Environment.ProcessId, portable: !installedCopy);
-                DiagnosticLog.Write("Update installer helper launched; shutting down Host.");
-                ((MainWindow)MainWindow).AllowClose();
-                Shutdown();
+                InstallUpdate(update, hostPath, unattended: false);
                 return;
             }
 
@@ -373,6 +382,16 @@ public partial class App : System.Windows.Application
         {
             _isCheckingForUpdates = false;
         }
+    }
+
+    private void InstallUpdate(DownloadedUpdate update, string hostPath, bool unattended)
+    {
+        // Let the Host exit and unload the Explorer hook before the helper replaces any files.
+        UpdateInstallerLauncher.LaunchAfterHostExit(update, hostPath, Environment.ProcessId,
+            portable: !GitHubUpdateService.IsInstalledCopy(hostPath), unattended);
+        DiagnosticLog.Write($"Update installer helper launched; unattended={unattended}. Shutting down Host.");
+        ((MainWindow)MainWindow).AllowClose();
+        Shutdown();
     }
 
     private void ScheduleRestore(BackupRestoreRequest request)
@@ -503,6 +522,7 @@ public partial class App : System.Windows.Application
 
     protected override async void OnExit(ExitEventArgs e)
     {
+        _automaticUpdate?.Dispose();
         if (_isSystemThemeSubscribed)
         {
             SystemEvents.UserPreferenceChanged -= SystemEvents_UserPreferenceChanged;
