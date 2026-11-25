@@ -55,28 +55,8 @@ public sealed class OpenRequestServerTests
     [InlineData("NOPE", 0)]
     public async Task CommandsAreAcknowledgedWithoutWaitingForUiWork(string command, byte expectedResponse)
     {
-        HostRequest? queuedRequest = null;
-        var pipeName = $"TileStart.Host.Tests.{Guid.NewGuid():N}";
-        var started = new TaskCompletionSource<(Dispatcher Dispatcher, OpenRequestServer Server)>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
         using var unblock = new ManualResetEventSlim();
-        var thread = new Thread(() =>
-        {
-            var dispatcher = Dispatcher.CurrentDispatcher;
-            _ = dispatcher.BeginInvoke(() =>
-            {
-                var server = new OpenRequestServer(request => queuedRequest = request, dispatcher, pipeName);
-                server.Start();
-                started.SetResult((dispatcher, server));
-                unblock.Wait(TimeSpan.FromSeconds(5));
-            });
-            Dispatcher.Run();
-        }) { IsBackground = true };
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        var (dispatcher, server) = await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
-
-        try
+        await WithServerAsync(async (_, pipeName, _) =>
         {
             using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
@@ -87,38 +67,16 @@ public sealed class OpenRequestServerTests
             var response = new byte[1];
             Assert.Equal(1, await client.ReadAsync(response, timeout.Token));
             Assert.Equal(expectedResponse, response[0]);
-            Assert.Null(queuedRequest);
-        }
-        finally
-        {
-            unblock.Set();
-            try
-            {
-                await server.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
-            }
-            finally
-            {
-                dispatcher.BeginInvokeShutdown(DispatcherPriority.Normal);
-            }
-        }
+        }, unblock);
     }
 
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task ShellOpenRequiresConfirmationBeforeItIsQueued(bool confirm)
-    {
-        var dispatcher = Dispatcher.CurrentDispatcher;
-        var pipeName = $"TileStart.Host.Tests.{Guid.NewGuid():N}";
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var queued = 0;
-        DispatcherHookEventHandler onPosted = (_, _) => Interlocked.Increment(ref queued);
-        dispatcher.Hooks.OperationPosted += onPosted;
-        var server = new OpenRequestServer(_ => { }, dispatcher, pipeName);
-        server.Start();
-
-        try
+    public Task ShellOpenRequiresConfirmationBeforeItIsQueued(bool confirm) =>
+        WithServerAsync(async (dispatcher, pipeName, requests) =>
         {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using (var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
             {
                 await client.ConnectAsync(timeout.Token);
@@ -126,11 +84,10 @@ public sealed class OpenRequestServerTests
                 var response = new byte[1];
                 Assert.Equal(1, await client.ReadAsync(response, timeout.Token));
                 Assert.Equal(1, response[0]);
-                Assert.Equal(0, Volatile.Read(ref queued));
+                Assert.Empty(await dispatcher.InvokeAsync(() => requests.ToArray(), DispatcherPriority.Normal, timeout.Token));
                 if (confirm)
                 {
                     await client.WriteAsync(new byte[] { 1 }, timeout.Token);
-                    Assert.Equal(0, await client.ReadAsync(response, timeout.Token));
                 }
             }
 
@@ -141,12 +98,50 @@ public sealed class OpenRequestServerTests
             var rejected = new byte[1];
             Assert.Equal(1, await next.ReadAsync(rejected, timeout.Token));
             Assert.Equal(0, rejected[0]);
-            Assert.Equal(confirm ? 1 : 0, Volatile.Read(ref queued));
+
+            var handled = await dispatcher.InvokeAsync(() => requests.ToArray(), DispatcherPriority.Normal, timeout.Token);
+            Assert.Equal(confirm ? [new HostRequest(HostRequestKind.Open)] : [], handled);
+        });
+
+    private static async Task WithServerAsync(
+        Func<Dispatcher, string, List<HostRequest>, Task> verify,
+        ManualResetEventSlim? unblock = null)
+    {
+        var pipeName = $"TileStart.Host.Tests.{Guid.NewGuid():N}";
+        var requests = new List<HostRequest>();
+        var started = new TaskCompletionSource<(Dispatcher Dispatcher, OpenRequestServer Server)>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            _ = dispatcher.BeginInvoke(() =>
+            {
+                var server = new OpenRequestServer(requests.Add, dispatcher, pipeName);
+                server.Start();
+                started.SetResult((dispatcher, server));
+                unblock?.Wait(TimeSpan.FromSeconds(5));
+            });
+            Dispatcher.Run();
+        }) { IsBackground = true };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        var (dispatcher, server) = await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        try
+        {
+            await verify(dispatcher, pipeName, requests);
         }
         finally
         {
-            await server.StopAsync();
-            dispatcher.Hooks.OperationPosted -= onPosted;
+            unblock?.Set();
+            try
+            {
+                await server.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            finally
+            {
+                dispatcher.BeginInvokeShutdown(DispatcherPriority.Normal);
+            }
         }
     }
 }
