@@ -37,7 +37,7 @@ public sealed class OpenRequestServer
         {
             try
             {
-                await _listenTask;
+                await _listenTask.ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -51,35 +51,49 @@ public sealed class OpenRequestServer
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            await using var pipe = new NamedPipeServerStream(_pipeName,
+            using var pipe = new NamedPipeServerStream(_pipeName,
                 PipeDirection.InOut,
                 1,
                 PipeTransmissionMode.Message,
                 PipeOptions.Asynchronous);
             try
             {
-                await pipe.WaitForConnectionAsync(cancellationToken);
-                await using var message = new MemoryStream();
+                await pipe.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
+                using var message = new MemoryStream();
                 var buffer = new byte[4096];
                 do
                 {
-                    var count = await pipe.ReadAsync(buffer, cancellationToken);
+                    var count = await pipe.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
                     if (count == 0)
                     {
                         break;
                     }
 
-                    await message.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
+                    message.Write(buffer, 0, count);
                 } while (!pipe.IsMessageComplete);
 
-                var accepted = HostRequest.TryDecode(message.ToArray(), out var request);
-                if (accepted)
+                var command = message.GetBuffer().AsMemory(0, (int)message.Length);
+                if (command.Span.SequenceEqual("SHELL_OPEN"u8))
                 {
-                    _ = _dispatcher.BeginInvoke(() => _handleRequest(request));
+                    // The shell may have let the original input through by the time it sees our reply.
+                    // Only open after it confirms that it will suppress the original input.
+                    await pipe.WriteAsync(new byte[] { 1 }, cancellationToken).ConfigureAwait(false);
+                    var count = await pipe.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                    if (count == 1 && buffer[0] == 1)
+                    {
+                        QueueRequest(new HostRequest(HostRequestKind.Open));
+                    }
+
+                    continue;
                 }
 
-                await pipe.WriteAsync(new[] { accepted ? (byte)1 : (byte)0 }, cancellationToken);
-                await pipe.FlushAsync(cancellationToken);
+                var accepted = HostRequest.TryDecode(command.Span, out var request);
+                if (accepted)
+                {
+                    QueueRequest(request);
+                }
+
+                await pipe.WriteAsync(new[] { accepted ? (byte)1 : (byte)0 }, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -90,4 +104,7 @@ public sealed class OpenRequestServer
             }
         }
     }
+
+    private void QueueRequest(HostRequest request) =>
+        _dispatcher.BeginInvoke(() => _handleRequest(request));
 }

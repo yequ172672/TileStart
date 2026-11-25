@@ -17,7 +17,8 @@ namespace
     };
 
     constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\TileStart.Host";
-    constexpr char kOpenCommand[] = "OPEN";
+    constexpr char kOpenCommand[] = "SHELL_OPEN";
+    constexpr BYTE kOpenAccepted = 1;
     constexpr DWORD kPipeTimeoutMilliseconds = 75;
     constexpr LONGLONG kMaximumLogBytes = 4LL * 1024 * 1024;
     constexpr WORD kShellRegisterHotKeyOrdinal = 2671;
@@ -290,8 +291,44 @@ namespace
         return TRUE;
     }
 
+    DWORD PipeMillisecondsRemaining(ULONGLONG deadline)
+    {
+        const auto now = GetTickCount64();
+        return now < deadline ? static_cast<DWORD>(deadline - now) : 0;
+    }
+
+    bool CompletePipeTransfer(HANDLE pipe, OVERLAPPED& operation, BOOL started,
+                              DWORD expected_size, ULONGLONG deadline)
+    {
+        DWORD transferred = 0;
+        if (started)
+        {
+            return GetOverlappedResult(pipe, &operation, &transferred, FALSE) && transferred == expected_size;
+        }
+        if (GetLastError() != ERROR_IO_PENDING)
+        {
+            return false;
+        }
+        if (GetOverlappedResultEx(pipe, &operation, &transferred, PipeMillisecondsRemaining(deadline), FALSE))
+        {
+            return transferred == expected_size;
+        }
+
+        const DWORD error = GetLastError();
+        if (error != WAIT_TIMEOUT && error != ERROR_IO_INCOMPLETE)
+        {
+            return false;
+        }
+
+        CancelIoEx(pipe, &operation);
+        // Reap the canceled local pipe I/O before its buffer and OVERLAPPED leave the stack.
+        // If completion won the cancellation race, report the actual transfer result.
+        return GetOverlappedResult(pipe, &operation, &transferred, TRUE) && transferred == expected_size;
+    }
+
     BOOL RequestHostOpen()
     {
+        const auto deadline = GetTickCount64() + kPipeTimeoutMilliseconds;
         if (!WaitNamedPipeW(kPipeName, kPipeTimeoutMilliseconds))
         {
             return FALSE;
@@ -302,10 +339,17 @@ namespace
                                         0,
                                         nullptr,
                                         OPEN_EXISTING,
-                                        0,
+                                        FILE_FLAG_OVERLAPPED,
                                         nullptr);
         if (pipe == INVALID_HANDLE_VALUE)
         {
+            return FALSE;
+        }
+
+        const HANDLE completed = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (completed == nullptr)
+        {
+            CloseHandle(pipe);
             return FALSE;
         }
 
@@ -316,21 +360,26 @@ namespace
         }
 
         BYTE response = 0;
-        DWORD written = 0;
-        DWORD response_size = 0;
-        const BOOL delivered = WriteFile(pipe,
-                                         kOpenCommand,
-                                         sizeof(kOpenCommand) - 1,
-                                         &written,
-                                         nullptr)
-            && written == sizeof(kOpenCommand) - 1
-            && ReadFile(pipe,
-                        &response,
-                        sizeof(response),
-                        &response_size,
-                        nullptr);
+        OVERLAPPED write_request{};
+        OVERLAPPED read_response{};
+        OVERLAPPED confirm_request{};
+        write_request.hEvent = read_response.hEvent = confirm_request.hEvent = completed;
+        const DWORD request_size = sizeof(kOpenCommand) - 1;
+        const bool delivered = PipeMillisecondsRemaining(deadline) != 0
+            && CompletePipeTransfer(pipe, write_request,
+                                    WriteFile(pipe, kOpenCommand, request_size, nullptr, &write_request),
+                                    request_size, deadline)
+            && CompletePipeTransfer(pipe, read_response,
+                                    ReadFile(pipe, &response, sizeof(response), nullptr, &read_response),
+                                    sizeof(response), deadline)
+            && response == kOpenAccepted
+            && PipeMillisecondsRemaining(deadline) != 0
+            && CompletePipeTransfer(pipe, confirm_request,
+                                    WriteFile(pipe, &kOpenAccepted, sizeof(kOpenAccepted), nullptr, &confirm_request),
+                                    sizeof(kOpenAccepted), deadline);
+        CloseHandle(completed);
         CloseHandle(pipe);
-        return delivered && response_size == sizeof(response) && response == 1;
+        return delivered;
     }
 
     HWND FindWin10StartButton(HWND taskbar)

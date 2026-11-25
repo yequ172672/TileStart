@@ -520,7 +520,7 @@ public partial class App : System.Windows.Application
         return null;
     }
 
-    protected override async void OnExit(ExitEventArgs e)
+    protected override void OnExit(ExitEventArgs e)
     {
         _automaticUpdate?.Dispose();
         if (_isSystemThemeSubscribed)
@@ -532,7 +532,7 @@ public partial class App : System.Windows.Application
         _winKeyHook?.Dispose();
         if (_server is not null)
         {
-            await _server.StopAsync();
+            _server.StopAsync().GetAwaiter().GetResult();
         }
 
         _shellIntegration?.Dispose();
